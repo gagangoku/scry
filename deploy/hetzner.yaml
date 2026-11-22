@@ -12,8 +12,9 @@
 #
 # Only the keys listed under env: below reach the container. Both are required
 # (the pod won't start without them), so the UI is never served without auth.
-# Ingest tokens are not part of the deployment: each project gets its own,
-# created in the UI (New project / Token) and stored hashed on the volume, so
+# Tokens are not part of the deployment: each project gets its own, made in
+# the browser (New project / Token) and never sent to the server. Sessions are
+# end-to-end encrypted with it, so the volume only holds ciphertext, and
 # /ingest only accepts senders holding a project's token. GET /plugin and
 # /healthz stay unauthenticated. A SCRY_INGEST_TOKEN key left in an older
 # scry-env secret is ignored.

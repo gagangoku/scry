@@ -8,11 +8,6 @@ const CONFIG = {
   PORT: 9999,
   HOST: '127.0.0.1',
   DATA_DIR: path.join(os.homedir(), '.jsonl-sessions'),
-  SEARCH_DIRS: [
-    path.join(os.homedir(), '.jsonl-sessions'),
-    path.join(os.homedir(), '.claude', 'projects'),
-  ],
-  MAX_RESULTS: 200,
   // Served as a tar.gz at GET /plugin.
   PLUGIN_DIR: path.join(__dirname, 'claude-chat-logger'),
 };
@@ -37,8 +32,6 @@ app.whenReady().then(async () => {
       pluginDir: CONFIG.PLUGIN_DIR,
       uiFile: path.join(__dirname, 'public', 'app.html'),
       publicDir: path.join(__dirname, 'public'),
-      searchDirs: CONFIG.SEARCH_DIRS,
-      maxResults: CONFIG.MAX_RESULTS,
     });
   } catch (err) {
     dialog.showErrorBox(

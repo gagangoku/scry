@@ -6,12 +6,14 @@
 # docker build -t scry .
 # docker run -p 9999:9999 -v scry-data:/data \
 #   -e SCRY_USER=... -e SCRY_PASS=... scry
-# Ingest tokens are per project, created in the UI and stored in /data.
+# Tokens are per project, made in the browser; /data only ever holds
+# ciphertext and hashes (see "End-to-end encryption" in the README).
 FROM node:22-alpine
 WORKDIR /app
 COPY package.json server.js ./
 COPY public/ public/
 COPY lib/ lib/
+COPY scripts/ scripts/
 COPY claude-chat-logger/ claude-chat-logger/
 RUN mkdir -p /data && chown 65532:65532 /data
 ENV NODE_ENV=production \

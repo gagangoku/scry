@@ -231,6 +231,10 @@
     .secret code { flex: 1; overflow-wrap: anywhere; font-size: 12.5px; }
     .dlg pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; background: none; border: 0; padding: 0; flex: 1; }
     .notice { font-size: 12.5px; color: var(--warn); background: rgba(240,163,94,.1); border-radius: 8px; padding: 8px 10px; }
+    .dlg .check { flex-direction: row; align-items: center; gap: 8px; }
+    .dlg .check input { width: auto; }
+    .locked-note { margin: 10px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 10px; font-size: 12.5px; color: var(--muted); }
+    .locked-note button { margin-top: 8px; }
 
     @media (max-width: 760px) {
       header { flex-wrap: wrap; }
@@ -258,9 +262,13 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2.5 2.5"/></svg>
       <span class="hide-sm">Token</span>
     </button>
+    <button class="icon-btn" id="lock-btn" title="Lock this project: forget its token in this browser" hidden>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+      <span class="hide-sm">Lock</span>
+    </button>
     <label class="search">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="q" placeholder="Search transcripts…" autocomplete="off" />
+      <input id="q" placeholder="Search unlocked transcripts…" autocomplete="off" />
       <kbd class="hide-sm">/</kbd>
     </label>
     <div class="spacer"></div>
@@ -285,28 +293,94 @@
   <script>
     // The UI always talks HTTP to the server that served it: server.js, or the
     // Electron app's own local server (main.js loads this page from it).
-    // `project` null means every project; '' means legacy files with no project.
-    const getJson = async (p) => {
-      const res = await fetch(p);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    //
+    // scry is end-to-end encrypted (lib/crypto.js has the scheme). The server
+    // only ever holds ciphertext: this page makes each project's token, derives
+    // the keys from it, and decrypts sessions here. A project is readable once
+    // it is unlocked with its token; tokens never leave this browser, only the
+    // auth key derived from them does (X-Scry-Key).
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+    const b64u = (buf) => {
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    };
+    const unb64u = (str) => {
+      const t = str.replace(/-/g, '+').replace(/_/g, '/');
+      const bin = atob(t + '==='.slice((t.length + 3) % 4));
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    };
+    const cat = (a, b) => { const o = new Uint8Array(a.length + b.length); o.set(a); o.set(b, a.length); return o; };
+    const E2E = {
+      available: () => Boolean(window.crypto && crypto.subtle),
+      newToken: () => 'scry_' + b64u(crypto.getRandomValues(new Uint8Array(32))),
+      async hkdf(token, info) {
+        const base = await crypto.subtle.importKey('raw', enc.encode(token), 'HKDF', false, ['deriveBits']);
+        return new Uint8Array(await crypto.subtle.deriveBits(
+          { name: 'HKDF', hash: 'SHA-256', salt: enc.encode('scry'), info: enc.encode(info) }, base, 256));
+      },
+      async authKey(token) { return b64u(await E2E.hkdf(token, 'scry/v1/auth')); },
+      async kek(token) {
+        return crypto.subtle.importKey('raw', await E2E.hkdf(token, 'scry/v1/kek'), 'AES-GCM', false, ['encrypt', 'decrypt']);
+      },
+      async wrap(token, project, rawKey) {
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ct = await crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv, additionalData: enc.encode(`scry/v1/key:${project}`) }, await E2E.kek(token), rawKey);
+        return b64u(cat(iv, new Uint8Array(ct)));
+      },
+      async unwrap(token, project, wrapped) {
+        const buf = unb64u(wrapped);
+        return new Uint8Array(await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: buf.subarray(0, 12), additionalData: enc.encode(`scry/v1/key:${project}`) },
+          await E2E.kek(token), buf.subarray(12)));
+      },
+      dataKey: (raw) => crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']),
+      // A stored line's plaintext, or null when the line is not encrypted.
+      async decryptLine(key, project, raw) {
+        let o;
+        try { o = JSON.parse(raw); } catch (_) { return null; }
+        if (!o || o.v !== 1 || typeof o.iv !== 'string' || typeof o.ct !== 'string') return null;
+        const pt = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: unb64u(o.iv), additionalData: enc.encode(`scry/v1/line:${project}`) }, key, unb64u(o.ct));
+        return dec.decode(pt);
+      },
+    };
+
+    // Unlocked projects: name -> { token, authKey, rawKey, key }.
+    const unlocked = new Map();
+    const authHeaders = (project) => {
+      const u = unlocked.get(project);
+      return u ? { 'x-scry-key': u.authKey } : {};
+    };
+
+    const getJson = async (p, headers = {}) => {
+      const res = await fetch(p, { headers });
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { msg = (await res.json()).error || msg; } catch (_) { /* no body */ }
+        throw new Error(msg);
+      }
       return res.json();
     };
-    const projParam = (project) => (project === null ? '' : 'project=' + encodeURIComponent(project));
-    const postJson = async (p, body) => {
-      const res = await fetch(p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const postJson = async (p, body, headers = {}) => {
+      const res = await fetch(p, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
       let data = {};
       try { data = await res.json(); } catch (_) { /* no body */ }
       if (!res.ok) return { error: data.error || `HTTP ${res.status}` };
       return data;
     };
-    // createProject / rotateToken answer { name, token, createdAt } or { error }.
     const scry = {
       projects: () => getJson('projects'),
-      createProject: (name) => postJson('projects', { name }),
-      rotateToken: (name) => postJson('projects/token', { name }),
-      sessions: (project) => getJson('sessions?' + projParam(project)),
-      session: (project, id) => getJson(`session?${projParam(project)}&id=${encodeURIComponent(id)}`),
-      search: (query, project) => getJson(`search?q=${encodeURIComponent(query)}&${projParam(project)}`),
+      createProject: (name, keys) => postJson('projects', { name, ...keys }),
+      rotateToken: (name, keys) => postJson('projects/token', { name, ...keys }, authHeaders(name)),
+      wrappedKey: (authKey) => getJson('ingest/key', { 'x-scry-key': authKey }),
+      sessions: (project) => getJson('sessions?project=' + encodeURIComponent(project), authHeaders(project)),
+      session: (project, id) => getJson(`session?project=${encodeURIComponent(project)}&id=${encodeURIComponent(id)}`, authHeaders(project)),
     };
 
     const $ = (id) => document.getElementById(id);
@@ -316,22 +390,151 @@
     const listEl = $('sessions');
     const content = $('content');
     const ALL = '__all__';
-    const NONE = '__none__';
 
     const store = {
       get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
       set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* ignore */ } },
     };
 
+    // Tokens kept in this browser so projects stay unlocked across reloads:
+    // sessionStorage (this tab) by default, localStorage when "remember" is ticked.
+    const tokenStore = {
+      read(area) {
+        try { return JSON.parse(window[area].getItem('scry.tokens') || '{}') || {}; } catch (_) { return {}; }
+      },
+      write(area, obj) {
+        try { window[area].setItem('scry.tokens', JSON.stringify(obj)); } catch (_) { /* ignore */ }
+      },
+      all() { return { ...tokenStore.read('sessionStorage'), ...tokenStore.read('localStorage') }; },
+      set(project, token, remember) {
+        for (const area of ['sessionStorage', 'localStorage']) {
+          const o = tokenStore.read(area);
+          if (area === 'localStorage' && !remember) delete o[project]; else o[project] = token;
+          tokenStore.write(area, o);
+        }
+      },
+      remove(project) {
+        for (const area of ['sessionStorage', 'localStorage']) {
+          const o = tokenStore.read(area);
+          delete o[project];
+          tokenStore.write(area, o);
+        }
+      },
+      remembered(project) { return project in tokenStore.read('localStorage'); },
+    };
+
+    // Unlocks a project with its token: answers null, or an error message.
+    async function unlockProject(project, token, remember) {
+      if (!E2E.available()) return 'This browser cannot decrypt here: open scry over https (or on localhost).';
+      token = token.trim();
+      try {
+        const authKey = await E2E.authKey(token);
+        const r = await scry.wrappedKey(authKey);
+        if (r.project !== project) return `That token belongs to “${r.project}”, not “${project}”.`;
+        const rawKey = await E2E.unwrap(token, project, r.wrappedKey);
+        unlocked.set(project, { token, authKey, rawKey, key: await E2E.dataKey(rawKey) });
+        tokenStore.set(project, token, remember);
+        return null;
+      } catch (err) {
+        return /HTTP 401|invalid project key/.test(err.message) ? 'That is not this project’s token.' : `Could not unlock: ${err.message}`;
+      }
+    }
+    async function unlockSaved() {
+      const saved = tokenStore.all();
+      await Promise.all(Object.entries(saved).map(async ([project, token]) => {
+        if (unlocked.has(project)) return;
+        if (!projectsInfo.some((p) => p.name === project && p.hasKey)) return;
+        if (await unlockProject(project, token, tokenStore.remembered(project))) tokenStore.remove(project);
+      }));
+    }
+    function lockProject(project) {
+      unlocked.delete(project);
+      tokenStore.remove(project);
+      for (const k of [...sessionCache.keys()]) if (k.startsWith(project + '/')) sessionCache.delete(k);
+    }
+
     let sessions = [];
     let current = null; // { project, id }
 
     const selectedProject = () => {
       const v = projectSel.value;
-      return v === ALL || !v ? null : v === NONE ? '' : v;
+      return v === ALL || !v ? null : v;
     };
-    const projectLabel = (p) => (p === '' ? 'no project' : p);
-    const projectChip = (p) => el('span', { className: 'chip' + (p === '' ? ' none' : '') }, projectLabel(p));
+    // The projects a view covers: the selected one, or every unlocked one.
+    const scopeProjects = () => {
+      const p = selectedProject();
+      return p === null ? [...unlocked.keys()].sort() : unlocked.has(p) ? [p] : [];
+    };
+    const projectLabel = (p) => p;
+    const projectChip = (p) => el('span', { className: 'chip' }, projectLabel(p));
+
+    // Text of a user prompt in either the chat-logger format or a raw Claude
+    // Code transcript line; '' when the line is not a user prompt.
+    function promptText(obj) {
+      if (!obj || typeof obj !== 'object') return '';
+      if (obj.kind === 'prompt' && typeof obj.prompt === 'string') return obj.prompt;
+      if (obj.type === 'user' && obj.message) {
+        const c = obj.message.content;
+        if (typeof c === 'string') return c;
+        if (Array.isArray(c)) {
+          const t = c.find((b) => b && b.type === 'text' && typeof b.text === 'string');
+          if (t) return t.text;
+        }
+      }
+      return '';
+    }
+
+    // Decrypts stored lines ({ line, raw }) into { line, text, data?, plain?, error? }:
+    // `text` is the plaintext line, `data` its JSON, `plain` marks a line
+    // stored unencrypted (from before encryption; scripts/scry-crypt.js migrate).
+    async function decryptLines(project, lines) {
+      const u = unlocked.get(project);
+      return Promise.all(lines.map(async ({ line, raw }) => {
+        let text;
+        let plain = false;
+        try {
+          text = await E2E.decryptLine(u.key, project, raw);
+        } catch (_) {
+          return { line, error: true, text: '' };
+        }
+        if (text === null) { text = raw; plain = true; }
+        let data;
+        try { data = JSON.parse(text); } catch (_) { data = undefined; }
+        return { line, text, data, plain };
+      }));
+    }
+
+    // Title and first timestamp of a session, from its decrypted head lines.
+    const headCache = new Map(); // first raw line -> { title, createdAt }
+    async function headMeta(s) {
+      if (!s.head || !s.head.length) return {};
+      const k = s.project + '\n' + s.head.join('\n');
+      if (headCache.has(k)) return headCache.get(k);
+      let title = '';
+      let createdAt = null;
+      for (const e of await decryptLines(s.project, s.head.map((raw, i) => ({ line: i + 1, raw })))) {
+        if (!e.data) continue;
+        const ts = e.data.ts || e.data.timestamp;
+        if (!createdAt && ts && !Number.isNaN(Date.parse(ts))) createdAt = new Date(ts).toISOString();
+        if (!title) title = promptText(e.data).trim().replace(/\s+/g, ' ').slice(0, 160);
+      }
+      const meta = { title, createdAt };
+      headCache.set(k, meta);
+      return meta;
+    }
+
+    // Decrypted sessions, re-fetched when their size changes (they only grow).
+    const sessionCache = new Map(); // "project/id" -> { size, s, entries }
+    async function loadSession(project, id, size) {
+      const k = `${project}/${id}`;
+      const c = sessionCache.get(k);
+      if (c && size !== undefined && c.size === size) return c;
+      const s = await scry.session(project, id);
+      const entries = await decryptLines(project, s.lines);
+      const v = { size: s.size, s, entries };
+      sessionCache.set(k, v);
+      return v;
+    }
 
     function el(tag, props = {}, ...children) {
       const n = document.createElement(tag);
@@ -438,9 +641,10 @@
       const prev = select || projectSel.value || saved || ALL;
       projectSel.innerHTML = '';
       projectSel.append(el('option', { value: ALL }, 'All projects'));
+      await unlockSaved();
       for (const p of projectsInfo) {
-        const label = p.name === '' ? '(no project)' : p.name + (p.hasToken ? '' : ' (no token)');
-        projectSel.append(el('option', { value: p.name === '' ? NONE : p.name }, label));
+        const label = p.name + (!p.hasKey ? ' (no token)' : unlocked.has(p.name) ? '' : ' 🔒');
+        projectSel.append(el('option', { value: p.name }, label));
       }
       projectSel.value = [...projectSel.options].some((o) => o.value === prev) ? prev : ALL;
       updateTokenButton();
@@ -448,6 +652,7 @@
     function updateTokenButton() {
       const p = selectedProject();
       $('token-btn').hidden = !p;
+      $('lock-btn').hidden = !p || !unlocked.has(p);
     }
 
     // ---------- project dialog ----------
@@ -475,11 +680,12 @@
       const env = `SCRY_PROJECT=${name}\nSCRY_INGEST_URL=${ingestUrl}\nSCRY_INGEST_TOKEN=${token}`;
       openDialog(
         el('h2', {}, fresh ? `Project “${name}” created` : `New token for “${name}”`),
-        el('div', { className: 'notice' }, 'Copy this token now. scry stores only a hash of it and cannot show it again.'),
+        el('div', { className: 'notice' },
+          'Copy this token now and keep it safe. It is the only key to this project’s sessions: it never leaves this browser, the server cannot show it again, and without it nobody — scry included — can read them.'),
         el('div', { className: 'secret' }, el('code', { className: 'mono' }, token), await copyButton(token)),
-        el('p', {}, 'Set these in the Claude environment that should log to this project (store the token as a secret):'),
+        el('p', {}, 'Set these in the Claude environment that should log to this project (store the token as a secret). The chat-logger plugin encrypts each line before sending it.'),
         el('div', { className: 'secret' }, el('pre', { className: 'mono' }, env), await copyButton(env, 'Copy all')),
-        fresh ? null : el('p', {}, 'Any previous token for this project no longer works.'),
+        fresh ? null : el('p', {}, 'The previous token no longer works, for sending or reading. Existing sessions stay readable with the new one.'),
         el('div', { className: 'actions' }, el('button', { className: 'primary', type: 'button', onclick: () => dlg.close() }, 'Done')),
       );
     }
@@ -495,20 +701,64 @@
           err.textContent = '';
           const name = input.value.trim();
           if (!name) { err.textContent = 'Enter a name.'; return; }
+          if (!E2E.available()) { err.textContent = 'This browser cannot encrypt here: open scry over https (or on localhost).'; return; }
           submit.disabled = true;
-          const r = await scry.createProject(name).catch((e2) => ({ error: e2.message }));
+          const token = E2E.newToken();
+          const rawKey = crypto.getRandomValues(new Uint8Array(32));
+          const r = await (async () => scry.createProject(name, {
+            authKey: await E2E.authKey(token),
+            wrappedKey: await E2E.wrap(token, name, rawKey),
+          }))().catch((e2) => ({ error: e2.message }));
           submit.disabled = false;
           if (r.error) { err.textContent = r.error; return; }
           store.set('scry.project', r.name);
           await loadProjects(r.name);
+          await unlockProject(r.name, token, false);
+          await loadProjects(r.name);
           await loadSessions();
           route();
-          showToken(r, true);
+          showToken({ name: r.name, token }, true);
         },
       },
         el('h2', {}, 'New project'),
-        el('p', {}, 'A project holds one Claude account’s sessions. It gets its own ingest token: senders can only write to the project their token belongs to.'),
+        el('p', {}, 'A project holds one Claude account’s sessions, end-to-end encrypted with its own token. The token is made here in your browser; scry stores only ciphertext and cannot read the sessions.'),
         el('label', {}, 'Name', input),
+        err,
+        el('div', { className: 'actions' },
+          el('button', { className: 'icon-btn', type: 'button', onclick: () => dlg.close() }, 'Cancel'),
+          submit),
+      );
+      dlg.innerHTML = '';
+      dlg.append(form);
+      dlg.showModal();
+      input.focus();
+    }
+
+    function unlockDialog(name) {
+      const input = el('input', { placeholder: 'scry_…', autocomplete: 'off', type: 'password', spellcheck: false });
+      const remember = el('input', { type: 'checkbox' });
+      const err = el('div', { className: 'error' });
+      const submit = el('button', { className: 'primary', type: 'submit' }, 'Unlock');
+      const form = el('form', {
+        className: 'dlg',
+        onsubmit: async (e) => {
+          e.preventDefault();
+          err.textContent = '';
+          if (!input.value.trim()) { err.textContent = 'Paste the token.'; return; }
+          submit.disabled = true;
+          const msg = await unlockProject(name, input.value, remember.checked);
+          submit.disabled = false;
+          if (msg) { err.textContent = msg; return; }
+          dlg.close();
+          await loadProjects(name);
+          await loadSessions();
+          route();
+        },
+      },
+        el('h2', {}, `Unlock “${name}”`),
+        el('p', {}, 'Sessions are encrypted with this project’s token. Paste it to decrypt them in this browser; the token itself is never sent to the server.'),
+        el('label', {}, 'Token', input),
+        el('label', { className: 'check' }, remember, 'Remember on this device'),
         err,
         el('div', { className: 'actions' },
           el('button', { className: 'icon-btn', type: 'button', onclick: () => dlg.close() }, 'Cancel'),
@@ -524,24 +774,46 @@
       const name = selectedProject();
       if (!name) return;
       const info = projectsInfo.find((p) => p.name === name);
-      const has = info && info.hasToken;
+      const has = info && info.hasKey;
+      if (has && !unlocked.has(name)) {
+        openDialog(
+          el('h2', {}, `Replace the token for “${name}”`),
+          el('p', {}, 'Unlock the project with its current token first: the new token has to carry the same encryption key. If the current token is lost, the sessions cannot be decrypted by anyone; create a new project instead.'),
+          el('div', { className: 'actions' },
+            el('button', { className: 'icon-btn', type: 'button', onclick: () => dlg.close() }, 'Cancel'),
+            el('button', { className: 'primary', type: 'button', onclick: () => unlockDialog(name) }, 'Unlock')),
+        );
+        return;
+      }
       const err = el('div', { className: 'error' });
       const go = el('button', {
         className: 'primary' + (has ? ' danger' : ''), type: 'button',
         onclick: async () => {
+          if (!E2E.available()) { err.textContent = 'This browser cannot encrypt here: open scry over https (or on localhost).'; return; }
           go.disabled = true;
-          const r = await scry.rotateToken(name).catch((e2) => ({ error: e2.message }));
+          const token = E2E.newToken();
+          // Same data key under the new token, or a fresh one for a project without a key.
+          const rawKey = has ? unlocked.get(name).rawKey : crypto.getRandomValues(new Uint8Array(32));
+          const r = await (async () => scry.rotateToken(name, {
+            authKey: await E2E.authKey(token),
+            wrappedKey: await E2E.wrap(token, name, rawKey),
+          }))().catch((e2) => ({ error: e2.message }));
           go.disabled = false;
           if (r.error) { err.textContent = r.error; return; }
+          const remember = tokenStore.remembered(name);
+          unlocked.delete(name);
           await loadProjects(name);
-          showToken(r, false);
+          await unlockProject(name, token, remember);
+          await loadProjects(name);
+          await loadSessions();
+          showToken({ name, token }, false);
         },
       }, has ? 'Replace token' : 'Generate token');
       openDialog(
-        el('h2', {}, `Ingest token for “${name}”`),
+        el('h2', {}, `Token for “${name}”`),
         el('p', {}, has
-          ? `This project has a token${info.tokenCreatedAt ? `, created ${fmtFull(info.tokenCreatedAt)}` : ''}. scry cannot show it again; generating a new one stops the current token from working.`
-          : 'This project has no token yet, so nothing can be sent to it. Generate one to start ingesting.'),
+          ? `This project has a token${info.tokenCreatedAt ? `, created ${fmtFull(info.tokenCreatedAt)}` : ''}. Replacing it makes a new one here and stops the current token from working, for sending and for reading. Sessions stay readable with the new token.`
+          : 'This project has no token yet, so nothing can be sent to it or read from it. Generate one to start; it also sets the project’s encryption key. Sessions stored before scry was encrypted need scripts/scry-crypt.js migrate afterwards.'),
         err,
         el('div', { className: 'actions' },
           el('button', { className: 'icon-btn', type: 'button', onclick: () => dlg.close() }, 'Cancel'),
@@ -550,15 +822,49 @@
     }
 
     // ---------- session list ----------
+    let listSeq = 0;
     async function loadSessions() {
+      const seq = ++listSeq;
+      let list;
       try {
-        sessions = await scry.sessions(selectedProject());
+        list = (await Promise.all(scopeProjects().map((p) => scry.sessions(p)))).flat();
+        await Promise.all(list.map(async (s) => {
+          const m = await headMeta(s).catch(() => ({}));
+          s.title = m.title || '';
+          if (m.createdAt) s.createdAt = m.createdAt;
+          delete s.head;
+        }));
       } catch (err) {
+        if (seq !== listSeq) return;
         listEl.innerHTML = '';
         listEl.append(el('div', { className: 'placeholder' }, `Could not load sessions: ${err.message}`));
         return;
       }
+      if (seq !== listSeq) return;
+      list.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+      sessions = list;
       renderList();
+    }
+
+    // Projects in the current scope that are still locked.
+    const lockedInScope = () => {
+      const p = selectedProject();
+      const names = p === null ? projectsInfo.map((x) => x.name) : [p];
+      return names.filter((n) => !unlocked.has(n));
+    };
+    function lockedNote() {
+      const locked = lockedInScope();
+      if (!locked.length) return null;
+      const p = selectedProject();
+      const info = p && projectsInfo.find((x) => x.name === p);
+      if (p && info && !info.hasKey) {
+        return el('div', { className: 'locked-note' }, `“${p}” has no token yet.`,
+          el('div', {}, el('button', { className: 'icon-btn', onclick: tokenDialog }, 'Generate token')));
+      }
+      return el('div', { className: 'locked-note' },
+        p ? `“${p}” is locked. Its sessions are encrypted; unlock it with its token to read them.`
+          : `${locked.length} locked project${locked.length === 1 ? '' : 's'} not shown: ${locked.join(', ')}. Pick one in the menu to unlock it.`,
+        p ? el('div', {}, el('button', { className: 'icon-btn', onclick: () => unlockDialog(p) }, 'Unlock')) : null);
     }
 
     function renderList() {
@@ -568,8 +874,12 @@
         : sessions;
       $('count').textContent = sessions.length ? (f ? `${shown.length} of ${sessions.length}` : `${sessions.length}`) : '';
       listEl.innerHTML = '';
+      const note = lockedNote();
+      if (note) listEl.append(note);
       if (!shown.length) {
-        listEl.append(el('div', { className: 'placeholder' }, sessions.length ? 'No sessions match.' : 'No sessions yet.'));
+        if (!note || scopeProjects().length) {
+          listEl.append(el('div', { className: 'placeholder' }, sessions.length ? 'No sessions match.' : 'No sessions yet.'));
+        }
         return;
       }
       const showProject = selectedProject() === null;
@@ -661,10 +971,13 @@
     // One rendered row (or null) per stored line. Understands the chat-logger
     // format ({kind: prompt|response}) and raw Claude Code transcript lines
     // ({type: user|assistant, message}); anything else shows as a raw event.
-    function renderLine({ line, data, raw }) {
+    function renderLine({ line, data, text, error }) {
+      if (error) {
+        return el('div', { className: 'sys', dataset: { line } }, `⚠ Line ${line} could not be decrypted with this token`);
+      }
       if (data === undefined) {
         return el('div', { className: 'event-row', dataset: { line } },
-          detailsBlock('event', `Unparsed line ${line}`, el('pre', {}, raw)));
+          detailsBlock('event', `Unparsed line ${line}`, el('pre', {}, text)));
       }
       const ts = data.ts || data.timestamp || null;
       if (data.kind === 'prompt') return userMsg(data.prompt || '', ts, line);
@@ -711,9 +1024,18 @@
       const seq = ++loadSeq;
       content.innerHTML = '';
       content.append(el('div', { className: 'placeholder' }, 'Loading session…'));
+      if (!unlocked.has(project)) {
+        content.innerHTML = '';
+        content.append(el('div', { className: 'empty' },
+          el('h3', {}, `“${project}” is locked`),
+          el('p', {}, 'This session is end-to-end encrypted. Unlock its project with the token to read it.'),
+          el('button', { className: 'primary', onclick: () => unlockDialog(project) }, 'Unlock')));
+        return;
+      }
       let s;
+      let entries;
       try {
-        s = await scry.session(project, id);
+        ({ s, entries } = await loadSession(project, id));
       } catch (err) {
         if (seq !== loadSeq) return;
         content.innerHTML = '';
@@ -744,7 +1066,10 @@
             el('span', { className: 'mono' }, s.id),
             el('span', { title: fmtFull(s.createdAt) }, 'Created ', fmtFull(s.createdAt)),
             el('span', { title: fmtFull(s.updatedAt) }, 'Updated ', fmtRel(s.updatedAt)),
-            el('span', {}, `${s.lines.length} entries`),
+            el('span', {}, `${entries.length} entries`),
+            entries.some((e) => e.plain) ? el('span', { className: 'chip warn', title: 'Stored before encryption: run scripts/scry-crypt.js migrate on the server' },
+              `${entries.filter((e) => e.plain).length} unencrypted`) : null,
+            entries.some((e) => e.error) ? el('span', { className: 'chip warn' }, `${entries.filter((e) => e.error).length} undecryptable`) : null,
           ),
         ),
         copyBtn,
@@ -752,7 +1077,7 @@
 
       const thread = el('div', { className: 'thread' });
       let lastDay = '';
-      for (const entry of s.lines) {
+      for (const entry of entries) {
         const ts = entry.data && (entry.data.ts || entry.data.timestamp);
         if (ts && !Number.isNaN(Date.parse(ts))) {
           const day = fmtDay(ts);
@@ -761,7 +1086,7 @@
         const node = renderLine(entry);
         if (node) thread.append(node);
       }
-      if (!s.lines.length) thread.append(el('div', { className: 'placeholder' }, 'This session is empty.'));
+      if (!entries.length) thread.append(el('div', { className: 'placeholder' }, 'This session is empty.'));
       const scroller = el('div', { id: 'scroller' }, thread);
       content.append(scroller);
 
@@ -803,26 +1128,59 @@
       content.innerHTML = '';
       const wrap = el('div', { className: 'results' }, el('div', { className: 'results-head' }, 'Searching…'));
       content.append(el('div', { id: 'scroller' }, wrap));
-      let hits;
+      // Sessions are encrypted on the server, so search runs here: every
+      // session in the unlocked projects in scope is fetched (cached by size),
+      // decrypted and scanned.
+      const MAX_HITS = 200;
+      const q = query.toLowerCase();
+      const hits = [];
+      let done = 0;
+      let failed = 0;
       try {
-        hits = await scry.search(query, selectedProject());
+        const list = (await Promise.all(scopeProjects().map((p) => scry.sessions(p)))).flat()
+          .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+        const queue = [...list];
+        const worker = async () => {
+          while (queue.length && hits.length < MAX_HITS && seq === searchSeq) {
+            const sm = queue.shift();
+            let entries;
+            try {
+              ({ entries } = await loadSession(sm.project, sm.id, sm.size));
+            } catch (_) { failed++; continue; }
+            for (const e of entries) {
+              const idx = e.text.toLowerCase().indexOf(q);
+              if (idx === -1) continue;
+              const start = Math.max(0, idx - 60);
+              hits.push({
+                project: sm.project, session: sm.id, line: e.line,
+                snippet: (start > 0 ? '…' : '') + e.text.slice(start, start + 200) + (e.text.length > start + 200 ? '…' : ''),
+              });
+              if (hits.length >= MAX_HITS) break;
+            }
+            done++;
+            if (seq === searchSeq) wrap.firstChild.textContent = `Searching… ${done} of ${list.length} sessions decrypted`;
+          }
+        };
+        await Promise.all([worker(), worker(), worker(), worker()]);
       } catch (err) {
         if (seq !== searchSeq) return;
         wrap.firstChild.textContent = `Search failed: ${err.message}`;
         return;
       }
       if (seq !== searchSeq) return;
-      const scope = selectedProject() === null ? 'all projects' : projectLabel(selectedProject());
-      wrap.firstChild.textContent = `${hits.length}${hits.length >= 200 ? '+' : ''} result${hits.length === 1 ? '' : 's'} for “${query}” in ${scope}`;
+      const sel = selectedProject();
+      const scope = sel === null ? 'unlocked projects' : projectLabel(sel);
+      const locked = lockedInScope();
+      wrap.firstChild.textContent = `${hits.length}${hits.length >= MAX_HITS ? '+' : ''} result${hits.length === 1 ? '' : 's'} for “${query}” in ${scope}`
+        + (locked.length ? ` (${locked.length} locked project${locked.length === 1 ? '' : 's'} not searched)` : '')
+        + (failed ? ` · ${failed} session${failed === 1 ? '' : 's'} could not be loaded` : '');
       for (const h of hits) {
-        const linked = h.session !== undefined;
         wrap.append(el('button', {
-          className: 'hit' + (linked ? '' : ' static'),
-          onclick: linked ? () => openSession(h.project, h.session, h.line) : null,
+          className: 'hit',
+          onclick: () => openSession(h.project, h.session, h.line),
         },
           el('div', { className: 'loc' },
-            linked ? [projectChip(h.project), el('span', { className: 'mono' }, `${h.session} · line ${h.line}`)]
-              : el('span', { className: 'mono' }, `${h.file}:${h.line}`)),
+            projectChip(h.project), el('span', { className: 'mono' }, `${h.session} · line ${h.line}`)),
           el('div', { className: 'snippet mono' }, highlight(h.snippet, query)),
         ));
       }
@@ -843,9 +1201,19 @@
     filterInput.addEventListener('input', renderList);
     $('new-project').addEventListener('click', newProjectDialog);
     $('token-btn').addEventListener('click', tokenDialog);
+    $('lock-btn').addEventListener('click', async () => {
+      const p = selectedProject();
+      if (!p) return;
+      lockProject(p);
+      await loadProjects(p);
+      await loadSessions();
+      route();
+    });
     projectSel.addEventListener('change', async () => {
       store.set('scry.project', projectSel.value);
       updateTokenButton();
+      const p = selectedProject();
+      if (p && !unlocked.has(p) && projectsInfo.some((x) => x.name === p && x.hasKey)) unlockDialog(p);
       await loadSessions();
       const h = new URLSearchParams(location.hash.slice(1));
       if (h.has('q')) showSearch(h.get('q'));
