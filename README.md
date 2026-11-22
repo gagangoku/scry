@@ -13,14 +13,14 @@ npm start
 
 ## Ingest
 
-POST JSONL lines to `http://127.0.0.1:8787/ingest`. The session id comes from
+POST JSONL lines to `http://127.0.0.1:9999/ingest`. The session id comes from
 the `X-Session-Id` header, else a `sessionId` field in each line, else
 `default`. Lines land in `~/.jsonl-sessions/<sessionId>.jsonl`.
 
 ```bash
 curl -X POST -H 'X-Session-Id: my-session' \
   --data-binary $'{"msg":"hello"}\n{"msg":"world"}' \
-  http://127.0.0.1:8787/ingest
+  http://127.0.0.1:9999/ingest
 ```
 
 ### Auth
