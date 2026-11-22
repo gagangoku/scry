@@ -11,6 +11,13 @@ npm install
 npm start
 ```
 
+The app window is a browser on the app's own local server, so the desktop app
+and the headless server run the same UI and API: everything works in both, and
+while the app runs, `http://127.0.0.1:9999/` opens the same UI in any browser.
+That server listens on localhost only, without basic auth. Only one of the app
+and `npm run serve` can hold port 9999 at a time; the app shows an error and
+quits if the port is taken.
+
 ## Ingest
 
 POST JSONL lines to `http://127.0.0.1:9999/ingest` with a project's token
@@ -82,9 +89,8 @@ Port, data directory, and search directories are set in `CONFIG` at the top of
 
 ## Server (headless)
 
-`npm run serve` runs [`server.js`](server.js): the same ingest server without
-Electron, plus the search UI in a browser at `/` and its JSON API at
-`GET /search?q=`. It is configured by environment: `PORT` (9999), `HOST`
+`npm run serve` runs [`server.js`](server.js): the same server and UI as the
+app, without Electron. It is configured by environment: `PORT` (9999), `HOST`
 (0.0.0.0), `SCRY_DATA_DIR` (`~/.jsonl-sessions`), `SCRY_SEARCH_DIRS` (extra
 `:`-separated dirs), and `SCRY_USER`/`SCRY_PASS` (basic auth for `/`,
 `/search`, `/projects`, `/sessions` and `/session`, and for creating projects).

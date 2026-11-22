@@ -279,8 +279,8 @@
   <dialog id="dlg"></dialog>
 
   <script>
-    // In Electron, preload.js exposes window.api; in a browser (server.js),
-    // the same calls go over HTTP to the page's own origin.
+    // The UI always talks HTTP to the server that served it: server.js, or the
+    // Electron app's own local server (main.js loads this page from it).
     // `project` null means every project; '' means legacy files with no project.
     const getJson = async (p) => {
       const res = await fetch(p);
@@ -296,8 +296,7 @@
       return data;
     };
     // createProject / rotateToken answer { name, token, createdAt } or { error }.
-    const api = window.api || {
-      config: async () => null,
+    const scry = {
       projects: () => getJson('projects'),
       createProject: (name) => postJson('projects', { name }),
       rotateToken: (name) => postJson('projects/token', { name }),
@@ -430,7 +429,7 @@
     // ---------- projects ----------
     let projectsInfo = [];
     async function loadProjects(select) {
-      try { projectsInfo = await api.projects(); } catch (_) { /* keep previous */ }
+      try { projectsInfo = await scry.projects(); } catch (_) { /* keep previous */ }
       const saved = store.get('scry.project');
       const prev = select || projectSel.value || saved || ALL;
       projectSel.innerHTML = '';
@@ -449,8 +448,7 @@
 
     // ---------- project dialog ----------
     const dlg = $('dlg');
-    let ingestUrl = new URL('ingest', location.href).href;
-    api.config().then((cfg) => { if (cfg) ingestUrl = `http://${cfg.HOST}:${cfg.PORT}/ingest`; }).catch(() => {});
+    const ingestUrl = new URL('ingest', location.href).href;
 
     async function copyButton(text, label = 'Copy') {
       const b = el('button', {
@@ -494,7 +492,7 @@
           const name = input.value.trim();
           if (!name) { err.textContent = 'Enter a name.'; return; }
           submit.disabled = true;
-          const r = await api.createProject(name).catch((e2) => ({ error: e2.message }));
+          const r = await scry.createProject(name).catch((e2) => ({ error: e2.message }));
           submit.disabled = false;
           if (r.error) { err.textContent = r.error; return; }
           store.set('scry.project', r.name);
@@ -528,7 +526,7 @@
         className: 'primary' + (has ? ' danger' : ''), type: 'button',
         onclick: async () => {
           go.disabled = true;
-          const r = await api.rotateToken(name).catch((e2) => ({ error: e2.message }));
+          const r = await scry.rotateToken(name).catch((e2) => ({ error: e2.message }));
           go.disabled = false;
           if (r.error) { err.textContent = r.error; return; }
           await loadProjects(name);
@@ -550,7 +548,7 @@
     // ---------- session list ----------
     async function loadSessions() {
       try {
-        sessions = await api.sessions(selectedProject());
+        sessions = await scry.sessions(selectedProject());
       } catch (err) {
         listEl.innerHTML = '';
         listEl.append(el('div', { className: 'placeholder' }, `Could not load sessions: ${err.message}`));
@@ -711,7 +709,7 @@
       content.append(el('div', { className: 'placeholder' }, 'Loading session…'));
       let s;
       try {
-        s = await api.session(project, id);
+        s = await scry.session(project, id);
       } catch (err) {
         if (seq !== loadSeq) return;
         content.innerHTML = '';
@@ -803,7 +801,7 @@
       content.append(el('div', { id: 'scroller' }, wrap));
       let hits;
       try {
-        hits = await api.search(query, selectedProject());
+        hits = await scry.search(query, selectedProject());
       } catch (err) {
         if (seq !== searchSeq) return;
         wrap.firstChild.textContent = `Search failed: ${err.message}`;

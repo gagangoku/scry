@@ -1,9 +1,7 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
 const os = require('os');
-const {
-  createIngestServer, searchJsonl, projectInfo, createProject, rotateProjectToken, listSessions, readSession, projectDir, sanitizeProject,
-} = require('./lib/core');
+const { createIngestServer } = require('./lib/core');
 
 // All configuration lives here.
 const CONFIG = {
@@ -19,49 +17,38 @@ const CONFIG = {
   PLUGIN_DIR: path.join(__dirname, 'claude-chat-logger'),
 };
 
+// The window is a browser on the app's own server, so the desktop app and the
+// headless server (server.js) run the same UI and the same API: everything in
+// one is in the other, and http://127.0.0.1:9999/ works in any browser while
+// the app runs. The server listens on localhost only, without basic auth.
+const UI_URL = `http://${CONFIG.HOST}:${CONFIG.PORT}/`;
+
 function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-    },
-  });
-  win.loadFile('index.html');
+  const win = new BrowserWindow({ width: 1200, height: 800 });
+  win.loadURL(UI_URL);
 }
 
 app.whenReady().then(async () => {
-  await createIngestServer({
-    dataDir: CONFIG.DATA_DIR,
-    port: CONFIG.PORT,
-    host: CONFIG.HOST,
-    pluginDir: CONFIG.PLUGIN_DIR,
-  });
-
-  // `project` null/undefined means every project; '' means legacy files with no project.
-  const proj = (p) => (p === null || p === undefined ? null : sanitizeProject(p));
-  ipcMain.handle('search', (_event, query, project) => {
-    const p = proj(project);
-    return searchJsonl({
-      dirs: p === null ? CONFIG.SEARCH_DIRS : [projectDir(CONFIG.DATA_DIR, p)],
-      query,
-      maxResults: CONFIG.MAX_RESULTS,
+  try {
+    await createIngestServer({
       dataDir: CONFIG.DATA_DIR,
-      recursive: p !== '',
+      port: CONFIG.PORT,
+      host: CONFIG.HOST,
+      pluginDir: CONFIG.PLUGIN_DIR,
+      uiFile: path.join(__dirname, 'index.html'),
+      searchDirs: CONFIG.SEARCH_DIRS,
+      maxResults: CONFIG.MAX_RESULTS,
     });
-  });
-  ipcMain.handle('projects', () => projectInfo(CONFIG.DATA_DIR));
-  // Errors come back as { error } so the message survives IPC.
-  const guarded = (fn) => (_event, name) => {
-    try { return fn(CONFIG.DATA_DIR, String(name || '')); } catch (err) { return { error: err.message }; }
-  };
-  ipcMain.handle('createProject', guarded(createProject));
-  ipcMain.handle('rotateToken', guarded(rotateProjectToken));
-  ipcMain.handle('sessions', (_event, project) => listSessions({ dataDir: CONFIG.DATA_DIR, project: proj(project) }));
-  ipcMain.handle('session', (_event, project, id) =>
-    readSession({ dataDir: CONFIG.DATA_DIR, project: proj(project) || '', id })
-  );
-  ipcMain.handle('config', () => CONFIG);
+  } catch (err) {
+    dialog.showErrorBox(
+      'Scry could not start',
+      err.code === 'EADDRINUSE'
+        ? `Port ${CONFIG.PORT} is already in use (is scry, or npm run serve, already running?).`
+        : err.message
+    );
+    app.quit();
+    return;
+  }
 
   createWindow();
 
