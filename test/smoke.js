@@ -173,8 +173,13 @@ function post(port, body, headers = {}) {
   // Web UI, /search, /healthz and basic auth
   const uiFile = path.join(tmp, 'ui.html');
   fs.writeFileSync(uiFile, '<p>scry ui</p>');
+  const landingFile = path.join(tmp, 'landing.html');
+  fs.writeFileSync(landingFile, '<p>scry landing</p>');
+  const publicDir = path.join(tmp, 'public');
+  fs.mkdirSync(publicDir);
+  fs.writeFileSync(path.join(publicDir, 'favicon.svg'), '<svg/>');
   const uiServer = await createIngestServer({
-    dataDir, port: 0, uiFile, searchDirs: [dataDir], uiUser: 'u', uiPass: 'p',
+    dataDir, port: 0, uiFile, landingFile, publicDir, searchDirs: [dataDir], uiUser: 'u', uiPass: 'p',
   });
   const uiPort = uiServer.address().port;
   const get = (p, headers = {}) => new Promise((resolve, reject) => {
@@ -187,11 +192,20 @@ function post(port, body, headers = {}) {
   const basic = (u, p) => ({ authorization: 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64') });
 
   assert.strictEqual((await get('/healthz')).status, 200);
+  // The landing page and favicons are public; the sessions viewer at /app is not
   let r = await get('/');
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.data, '<p>scry landing</p>');
+  r = await get('/favicon.svg');
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.headers['content-type'], 'image/svg+xml');
+  assert.strictEqual((await get('/favicon.ico')).status, 404);
+  assert.strictEqual((await get('/app/')).headers.location, '/app');
+  r = await get('/app');
   assert.strictEqual(r.status, 401);
   assert.match(r.headers['www-authenticate'], /^Basic/);
   assert.strictEqual((await get('/search?q=alpha', basic('u', 'wrong'))).status, 401);
-  r = await get('/', basic('u', 'p'));
+  r = await get('/app', basic('u', 'p'));
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.data, '<p>scry ui</p>');
   r = await get('/search?q=alpha', basic('u', 'p'));
@@ -238,6 +252,16 @@ function post(port, body, headers = {}) {
   assert.strictEqual((await get('/session?project=work&id=missing', basic('u', 'p'))).status, 404);
   assert.strictEqual((await get('/session?project=..&id=s1', basic('u', 'p'))).status, 404);
   uiServer.close();
+
+  // Without a landing page, / sends you to the app
+  const appOnly = await createIngestServer({ dataDir, port: 0, uiFile });
+  const appRes = await new Promise((resolve, reject) => {
+    http.get({ host: '127.0.0.1', port: appOnly.address().port, path: '/' }, resolve).on('error', reject);
+  });
+  assert.strictEqual(appRes.statusCode, 302);
+  assert.strictEqual(appRes.headers.location, '/app');
+  appRes.resume();
+  appOnly.close();
 
   server.close();
   fs.rmSync(tmp, { recursive: true, force: true });
