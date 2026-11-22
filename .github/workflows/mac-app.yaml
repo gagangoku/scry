@@ -1,0 +1,57 @@
+name: Build macOS app
+
+# Builds the Electron app as a universal (Apple Silicon + Intel) DMG and
+# publishes it to the `mac-latest` GitHub release, which the landing page's
+# download button links to:
+# https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac.dmg
+on:
+  push:
+    branches: [master]
+    paths:
+      - main.js
+      - lib/**
+      - public/**
+      - claude-chat-logger/**
+      - build/**
+      - package.json
+      - package-lock.json
+      - .github/workflows/mac-app.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mac-app
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - run: npm test
+
+      # Ad-hoc signed (mac.identity "-"), not notarized: no Apple Developer
+      # account is needed, and users clear Gatekeeper once on first launch.
+      - run: npm run dist:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Publish to the mac-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f mac-latest
+          git push -f origin refs/tags/mac-latest
+          gh release view mac-latest >/dev/null 2>&1 || gh release create mac-latest \
+            --title "Scry for macOS" \
+            --notes "Latest build of the Scry desktop app from master. Install steps: https://github.com/gagangoku/scry#macos-app"
+          gh release upload mac-latest dist/Scry-mac.dmg --clobber

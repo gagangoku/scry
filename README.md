@@ -18,6 +18,35 @@ That server listens on localhost only, without basic auth. Only one of the app
 and `npm run serve` can hold port 9999 at a time; the app shows an error and
 quits if the port is taken.
 
+## macOS app
+
+The landing page's **Download for macOS** button links to
+[`Scry-mac.dmg`](https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac.dmg),
+a universal (Apple Silicon + Intel) build.
+[`.github/workflows/mac-app.yaml`](.github/workflows/mac-app.yaml) builds it on
+a macOS runner with `npm run dist:mac` (electron-builder) whenever the app's
+files change on `master`, or on demand from the Actions tab, and replaces the
+DMG on the `mac-latest` release.
+
+It does not install itself:
+
+1. Open the DMG and drag **Scry** into **Applications**.
+2. The app is ad-hoc signed but not notarized, so Gatekeeper blocks the first
+   launch. Open it once, click **Done**, then in **System Settings → Privacy &
+   Security** click **Open Anyway** next to Scry and confirm. Or clear the
+   quarantine flag and open it normally:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Scry.app
+   ```
+
+3. Point the plugin at `http://127.0.0.1:9999/ingest` with a project's token.
+
+Notarizing (so step 2 goes away) needs an Apple Developer ID certificate and
+electron-builder's `CSC_LINK`/`APPLE_ID` secrets in the workflow, in place of
+`mac.identity: "-"`. The app is packaged without asar because `/plugin` runs
+`tar` on `claude-chat-logger/`, which must be a real directory.
+
 ## Ingest
 
 POST JSONL lines to `http://127.0.0.1:9999/ingest` with a project's token
