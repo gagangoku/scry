@@ -93,6 +93,7 @@
       padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2);
       cursor: pointer; color: var(--muted); white-space: nowrap;
     }
+    a.icon-btn { text-decoration: none; }
     .icon-btn:hover { background: var(--hover); color: var(--text); }
     .spacer { flex: 1; }
 
@@ -736,6 +737,11 @@
           setTimeout(() => { copyBtn.textContent = 'Copy id'; }, 1200);
         },
       }, 'Copy id');
+      // Cloud sessions link to their claude.ai web chat.
+      const webBtn = s.webUrl ? el('a', {
+        className: 'icon-btn', href: s.webUrl, target: '_blank', rel: 'noopener noreferrer',
+        title: 'Open this session’s chat on claude.ai',
+      }, 'Open in Claude ↗') : null;
       content.append(el('div', { className: 'chat-head' },
         backBtn,
         el('div', { className: 'info' },
@@ -748,6 +754,7 @@
             el('span', {}, `${s.lines.length} entries`),
           ),
         ),
+        webBtn,
         copyBtn,
       ));
 

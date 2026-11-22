@@ -123,6 +123,13 @@ mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-session
   agent responses on the left with Markdown, collapsible thinking, tool calls
   and results, and a badge on aborted/errored turns. Understands both the
   chat-logger format and raw Claude Code transcript lines.
+- Cloud (claude.ai/code) sessions get an **Open in Claude** button in the
+  session header that opens the session's web chat,
+  `https://claude.ai/code/session_01...`. A session counts as a cloud session
+  when its id is a `session_01...` id (the chat-logger plugin's key in cloud
+  sessions) or one of its first lines has a `remote_session_id`; `/sessions`
+  and `/session` answer that link as `webUrl` (null otherwise). In the
+  Electron app it opens in the default browser.
 - **Search** (`/` to focus): case-insensitive substring scan. With **All
   projects** it covers every `.jsonl` under the search dirs and local projects
   (in the Electron app, `~/.claude/projects/`); with one project, only that project.

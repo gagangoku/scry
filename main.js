@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, shell } = require('electron');
 const path = require('path');
 const os = require('os');
 const { createIngestServer } = require('./lib/core');
@@ -27,6 +27,12 @@ const UI_URL = `http://${CONFIG.HOST}:${CONFIG.PORT}/app`;
 
 function createWindow() {
   const win = new BrowserWindow({ width: 1200, height: 800 });
+  // Links that open a new window (Open in Claude, links in messages) go to the
+  // default browser, where the user is signed in to claude.ai.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
   win.loadURL(UI_URL);
 }
 
