@@ -127,6 +127,19 @@ function post(port, body, headers = {}) {
   assert.strictEqual(sess.lines.length, 3);
   assert.strictEqual(sess.lines[1].data.response, 'alpha two');
   assert.strictEqual(await readSession({ dataDir, project: 'work', id: 'nope' }), null);
+  assert.strictEqual(list[0].webUrl, null);
+
+  // Cloud sessions carry their claude.ai web chat URL: from a session_01... id,
+  // else from a line's remote_session_id
+  const webDir = path.join(tmp, 'web-data');
+  fs.mkdirSync(path.join(webDir, 'w'), { recursive: true });
+  fs.writeFileSync(path.join(webDir, 'w', 'session_01Abc.jsonl'), '{"kind":"prompt","prompt":"hi"}\n');
+  fs.writeFileSync(path.join(webDir, 'w', 'uuid-1.jsonl'), '{"kind":"prompt","prompt":"x","remote_session_id":"session_01Xyz"}\n');
+  fs.writeFileSync(path.join(webDir, 'w', 'uuid-2.jsonl'), '{"kind":"prompt","prompt":"x","remote_session_id":"evil/../x"}\n');
+  const web = Object.fromEntries(listSessions({ dataDir: webDir, project: 'w' }).map((x) => [x.id, x.webUrl]));
+  assert.strictEqual(web['session_01Abc'], 'https://claude.ai/code/session_01Abc');
+  assert.strictEqual(web['uuid-1'], 'https://claude.ai/code/session_01Xyz');
+  assert.strictEqual(web['uuid-2'], null);
 
   // Search across both the ingest dir and the claude projects dir
   let hits = await searchJsonl({ dirs: [dataDir, path.join(tmp, 'claude-projects')], query: 'alpha', dataDir });
