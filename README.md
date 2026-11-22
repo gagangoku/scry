@@ -111,6 +111,11 @@ mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-session
 
 - **Project menu** in the header: one project, or **All projects**. It scopes
   both the session list and search.
+- **claude-code-local** (Electron app only): a read-only project over the
+  Claude Code transcripts in `~/.claude/projects/` on this machine. Its
+  sessions are `~/.claude/projects/<folder>/<id>.jsonl` (subagent transcripts
+  deeper down are searchable but not listed). It has no token, and nothing is
+  ingested into it.
 - **Sessions** sidebar: every session with its name (first prompt, else id),
   id, created time (first line's `ts`) and last-updated time, newest first,
   with a filter box. Refreshes every 20s.
@@ -119,11 +124,11 @@ mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-session
   and results, and a badge on aborted/errored turns. Understands both the
   chat-logger format and raw Claude Code transcript lines.
 - **Search** (`/` to focus): case-insensitive substring scan. With **All
-  projects** it covers every `.jsonl` under the search dirs (in the Electron
-  app, also `~/.claude/projects/`); with one project, only that project.
+  projects** it covers every `.jsonl` under the search dirs and local projects
+  (in the Electron app, `~/.claude/projects/`); with one project, only that project.
   Clicking a hit opens the session scrolled to that line.
 
-Port, data directory, and search directories are set in `CONFIG` at the top of
+Port, data directory, search directories and local projects are set in `CONFIG` at the top of
 `main.js`.
 
 ## Server (headless)

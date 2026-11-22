@@ -8,10 +8,12 @@ const CONFIG = {
   PORT: 9999,
   HOST: '127.0.0.1',
   DATA_DIR: path.join(os.homedir(), '.jsonl-sessions'),
-  SEARCH_DIRS: [
-    path.join(os.homedir(), '.jsonl-sessions'),
-    path.join(os.homedir(), '.claude', 'projects'),
-  ],
+  SEARCH_DIRS: [path.join(os.homedir(), '.jsonl-sessions')],
+  // Read-only projects over local Claude Code transcripts: listed, opened and
+  // searched like ingested projects, but nothing is ingested into them.
+  LOCAL_PROJECTS: {
+    'claude-code-local': path.join(os.homedir(), '.claude', 'projects'),
+  },
   MAX_RESULTS: 200,
   // Served as a tar.gz at GET /plugin.
   PLUGIN_DIR: path.join(__dirname, 'claude-chat-logger'),
@@ -38,6 +40,7 @@ app.whenReady().then(async () => {
       uiFile: path.join(__dirname, 'public', 'app.html'),
       publicDir: path.join(__dirname, 'public'),
       searchDirs: CONFIG.SEARCH_DIRS,
+      localProjects: CONFIG.LOCAL_PROJECTS,
       maxResults: CONFIG.MAX_RESULTS,
     });
   } catch (err) {
