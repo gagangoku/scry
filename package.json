@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "serve": "node server.js",
     "test": "node test/smoke.js"
   },
   "devDependencies": {

@@ -47,6 +47,28 @@ every `.jsonl` file under `~/.jsonl-sessions/` and `~/.claude/projects/`.
 Port, data directory, and search directories are set in `CONFIG` at the top of
 `main.js`.
 
+## Server (headless)
+
+`npm run serve` runs [`server.js`](server.js): the same ingest server without
+Electron, plus the search UI in a browser at `/` and its JSON API at
+`GET /search?q=`. It is configured by environment: `PORT` (9999), `HOST`
+(0.0.0.0), `SCRY_DATA_DIR` (`~/.jsonl-sessions`), `SCRY_SEARCH_DIRS` (extra
+`:`-separated dirs), `SCRY_INGEST_TOKEN`, and `SCRY_USER`/`SCRY_PASS` (basic
+auth for `/` and `/search`). `GET /healthz` and `GET /plugin` are always open.
+
+## Deployment
+
+The `Dockerfile` packages the headless server (`node:22-alpine`, no npm
+dependencies), storing sessions in the `/data` volume.
+`.github/workflows/docker.yaml` runs the tests and pushes `teltrix/scry:latest`
+and `:<sha>` to Docker Hub on every push to `master` (needs the
+`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets).
+`deploy/hetzner.yaml` runs it on Kubernetes behind Traefik at
+`scry.teltrix.ai`, with a 10Gi PersistentVolumeClaim and Keel rolling out each
+new `:latest`; its header lists the secret and apply steps. Point senders at
+`https://scry.teltrix.ai/ingest` and setup scripts at
+`https://scry.teltrix.ai/plugin`.
+
 ## Test
 
 ```bash
