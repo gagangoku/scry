@@ -14,6 +14,7 @@
 #   CLAUDE_CODE_PLUGIN_DIRS=~/.claude-plugins/chat-logger
 #   SCRY_INGEST_URL=https://gagan.ngrok-free.app/ingest   (unset = local-only)
 #   SCRY_INGEST_TOKEN=<token>                                          (secret, optional)
+#   SCRY_PROJECT=<project>               (required for ingestion; one per Claude account)
 set -euo pipefail
 
 URL="${SCRY_PLUGIN_URL:-https://gagan.ngrok-free.app/plugin}"

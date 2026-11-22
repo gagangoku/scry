@@ -1,7 +1,9 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const os = require('os');
-const { createIngestServer, searchJsonl } = require('./lib/core');
+const {
+  createIngestServer, searchJsonl, listProjects, listSessions, readSession, projectDir, sanitizeProject,
+} = require('./lib/core');
 
 // All configuration lives here.
 const CONFIG = {
@@ -21,8 +23,8 @@ const CONFIG = {
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 900,
-    height: 650,
+    width: 1200,
+    height: 800,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
@@ -39,8 +41,22 @@ app.whenReady().then(async () => {
     pluginDir: CONFIG.PLUGIN_DIR,
   });
 
-  ipcMain.handle('search', (_event, query) =>
-    searchJsonl({ dirs: CONFIG.SEARCH_DIRS, query, maxResults: CONFIG.MAX_RESULTS })
+  // `project` null/undefined means every project; '' means legacy files with no project.
+  const proj = (p) => (p === null || p === undefined ? null : sanitizeProject(p));
+  ipcMain.handle('search', (_event, query, project) => {
+    const p = proj(project);
+    return searchJsonl({
+      dirs: p === null ? CONFIG.SEARCH_DIRS : [projectDir(CONFIG.DATA_DIR, p)],
+      query,
+      maxResults: CONFIG.MAX_RESULTS,
+      dataDir: CONFIG.DATA_DIR,
+      recursive: p !== '',
+    });
+  });
+  ipcMain.handle('projects', () => listProjects(CONFIG.DATA_DIR));
+  ipcMain.handle('sessions', (_event, project) => listSessions({ dataDir: CONFIG.DATA_DIR, project: proj(project) }));
+  ipcMain.handle('session', (_event, project, id) =>
+    readSession({ dataDir: CONFIG.DATA_DIR, project: proj(project) || '', id })
   );
   // The token stays out of the renderer.
   ipcMain.handle('config', () => ({ ...CONFIG, INGEST_TOKEN: undefined }));

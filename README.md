@@ -13,12 +13,16 @@ npm start
 
 ## Ingest
 
-POST JSONL lines to `http://127.0.0.1:9999/ingest`. The session id comes from
-the `X-Session-Id` header, else a `sessionId` field in each line, else
-`default`. Lines land in `~/.jsonl-sessions/<sessionId>.jsonl`.
+POST JSONL lines to `http://127.0.0.1:9999/ingest`. Every line needs a
+**project**: the `X-Project` header, else a `project` field in the line. A
+request where any line has no project is rejected with `400` and nothing is
+written. Projects keep different Claude accounts' sessions apart (e.g. `work`,
+`personal`). The session id comes from the `X-Session-Id` header, else a
+`sessionId` field in each line, else `default`. Lines land in
+`~/.jsonl-sessions/<project>/<sessionId>.jsonl`.
 
 ```bash
-curl -X POST -H 'X-Session-Id: my-session' \
+curl -X POST -H 'X-Project: work' -H 'X-Session-Id: my-session' \
   --data-binary $'{"msg":"hello"}\n{"msg":"world"}' \
   http://127.0.0.1:9999/ingest
 ```
@@ -39,10 +43,31 @@ environment setup scripts install the plugin from this endpoint (see the
 plugin's README); it is unauthenticated because setup scripts cannot read
 secrets, and the tarball is just the plugin's code.
 
-## Search
+### Migrating pre-project data
 
-Type a query in the app window. It does a case-insensitive substring scan of
-every `.jsonl` file under `~/.jsonl-sessions/` and `~/.claude/projects/`.
+Files ingested before projects existed sit directly in the data dir. The UI
+still shows them under **(no project)**; to assign them a project, move them
+into a subdirectory:
+
+```bash
+mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-sessions/work/
+```
+
+## UI
+
+- **Project menu** in the header: one project, or **All projects**. It scopes
+  both the session list and search.
+- **Sessions** sidebar: every session with its name (first prompt, else id),
+  id, created time (first line's `ts`) and last-updated time, newest first,
+  with a filter box. Refreshes every 20s.
+- Clicking a session opens its full log as a chat: user prompts right-aligned,
+  agent responses on the left with Markdown, collapsible thinking, tool calls
+  and results, and a badge on aborted/errored turns. Understands both the
+  chat-logger format and raw Claude Code transcript lines.
+- **Search** (`/` to focus): case-insensitive substring scan. With **All
+  projects** it covers every `.jsonl` under the search dirs (in the Electron
+  app, also `~/.claude/projects/`); with one project, only that project.
+  Clicking a hit opens the session scrolled to that line.
 
 Port, data directory, and search directories are set in `CONFIG` at the top of
 `main.js`.
@@ -54,7 +79,10 @@ Electron, plus the search UI in a browser at `/` and its JSON API at
 `GET /search?q=`. It is configured by environment: `PORT` (9999), `HOST`
 (0.0.0.0), `SCRY_DATA_DIR` (`~/.jsonl-sessions`), `SCRY_SEARCH_DIRS` (extra
 `:`-separated dirs), `SCRY_INGEST_TOKEN`, and `SCRY_USER`/`SCRY_PASS` (basic
-auth for `/` and `/search`). `GET /healthz` and `GET /plugin` are always open.
+auth for `/`, `/search`, `/projects`, `/sessions` and `/session`). The JSON
+API: `GET /search?q=[&project=]`, `GET /projects`, `GET /sessions[?project=]`,
+`GET /session?project=&id=` — `project` absent means all projects, present and
+empty means the legacy files with no project. `GET /healthz` and `GET /plugin` are always open.
 
 ## Deployment
 
@@ -76,5 +104,7 @@ npm test
 ```
 
 Runs `test/smoke.js` with plain Node (no Electron needed): starts the server,
-posts lines for two sessions, checks the files, and searches across both the
-ingest directory and a fake projects directory.
+checks that ingestion without a project is rejected, posts lines for sessions
+in two projects, checks the files, lists projects and sessions, reads a
+session, and searches across all projects, one project, and a fake
+`~/.claude/projects` directory.

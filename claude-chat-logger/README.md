@@ -5,11 +5,11 @@ A Claude Code plugin that saves every user prompt and agent response to a JSONL 
 ## What it does
 
 - Logs two kinds of JSON lines:
-  - `{kind: "prompt", ts, session_id, remote_session_id?, prompt}` the moment a prompt is submitted, so a long or interrupted turn never loses it.
-  - `{kind: "response", ts, session_id, remote_session_id?, turn_id, reason, response, thinking?}` when the turn ends — any reason, aborted and errored turns included (`reason` says which). `thinking` is the model's streamed thinking for that turn, captured via a pass-through `turn.step` hook. Subagent turns are skipped.
+  - `{kind: "prompt", ts, session_id, project?, remote_session_id?, prompt}` the moment a prompt is submitted, so a long or interrupted turn never loses it.
+  - `{kind: "response", ts, session_id, project?, remote_session_id?, turn_id, reason, response, thinking?}` when the turn ends — any reason, aborted and errored turns included (`reason` says which). `thinking` is the model's streamed thinking for that turn, captured via a pass-through `turn.step` hook. Subagent turns are skipped.
 - `remote_session_id` is the claude.ai/code session id (`session_01...`), resolved at session start from the `claude-code-remote` MCP server in cloud sessions; it is also the scry session key, so scry files map to claude.ai/code URLs. Outside cloud sessions the local session UUID is used.
 - Appends each line to `~/.claude/chat-log.jsonl`.
-- POSTs each line to the endpoint in the `SCRY_INGEST_URL` environment variable (e.g. `https://gagan.ngrok-free.app/ingest`) with the session key in `X-Session-Id`. When `SCRY_INGEST_URL` is unset, HTTP ingestion is off and the plugin only writes the local file. When `SCRY_INGEST_TOKEN` is set, it is sent as `Authorization: Bearer <token>`; set it as a secret to match the scry server's token. When the endpoint is unreachable or rejects the token, the plugin warns once per session and keeps logging locally.
+- POSTs each line to the endpoint in the `SCRY_INGEST_URL` environment variable (e.g. `https://gagan.ngrok-free.app/ingest`) with the session key in `X-Session-Id` and the `SCRY_PROJECT` environment variable in `X-Project`. scry rejects lines without a project, so when `SCRY_PROJECT` is unset the plugin warns once and logs locally only. Give each Claude account its own project (e.g. `SCRY_PROJECT=work`, `SCRY_PROJECT=personal`) to keep their sessions apart in scry. When `SCRY_INGEST_URL` is unset, HTTP ingestion is off and the plugin only writes the local file. When `SCRY_INGEST_TOKEN` is set, it is sent as `Authorization: Bearer <token>`; set it as a secret to match the scry server's token. When the endpoint is unreachable or rejects the token, the plugin warns once per session and keeps logging locally.
 - Registers `/chat-search <text>`: case-insensitive fixed-string search over the local log, prints the last 10 matches.
 
 ## Install in Claude Code cloud environments
@@ -22,6 +22,7 @@ Cloud sessions ignore plugins enabled by a repository's `.claude/settings.json`,
    CLAUDE_CODE_PLUGIN_DIRS=~/.claude-plugins/chat-logger
    SCRY_INGEST_URL=https://gagan.ngrok-free.app/ingest
    SCRY_INGEST_TOKEN=<the scry server's ingest token>
+   SCRY_PROJECT=<project name, e.g. one per Claude account>
    ```
    Separate multiple plugin paths with `:`. Store the token as a secret. Leave `SCRY_INGEST_URL` unset to log locally only.
 

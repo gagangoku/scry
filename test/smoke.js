@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
-const { createIngestServer, searchJsonl } = require('../lib/core');
+const { createIngestServer, searchJsonl, listProjects, listSessions, readSession } = require('../lib/core');
 
 function post(port, body, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -30,25 +30,67 @@ function post(port, body, headers = {}) {
   const server = await createIngestServer({ dataDir, port: 0 });
   const port = server.address().port;
 
-  // Session id from header
-  let res = await post(port, '{"msg":"alpha one"}\n{"msg":"alpha two"}\n', { 'x-session-id': 's1' });
+  // No project anywhere: rejected, nothing written
+  let res = await post(port, '{"msg":"orphan"}\n', { 'x-session-id': 's0' });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.error, /project/);
+  // One line without a project rejects the whole request
+  res = await post(port, '{"project":"work","msg":"ok"}\n{"msg":"orphan"}\n', { 'x-session-id': 's0' });
+  assert.strictEqual(res.status, 400);
+  assert.deepStrictEqual(fs.readdirSync(dataDir), []);
+
+  // Session id and project from headers
+  res = await post(port, '{"ts":"2026-01-02T03:04:05Z","kind":"prompt","prompt":"alpha one"}\n{"kind":"response","response":"alpha two"}\n',
+    { 'x-session-id': 's1', 'x-project': 'work' });
   assert.strictEqual(res.appended, 2);
 
-  // Session id from the line itself
-  res = await post(port, '{"sessionId":"s2","msg":"beta"}\n');
+  // Session id and project from the line itself
+  res = await post(port, '{"sessionId":"s2","project":"personal","msg":"beta"}\n');
   assert.strictEqual(res.appended, 1);
 
   // Appending again to the same session
-  res = await post(port, '{"msg":"alpha three"}\n', { 'x-session-id': 's1' });
+  res = await post(port, '{"msg":"alpha three"}\n', { 'x-session-id': 's1', 'x-project': 'work' });
   assert.strictEqual(res.appended, 1);
 
-  const s1 = fs.readFileSync(path.join(dataDir, 's1.jsonl'), 'utf8');
+  // Same session id in another project stays separate; traversal is neutralized
+  res = await post(port, '{"msg":"gamma"}\n', { 'x-session-id': 's1', 'x-project': '../personal' });
+  assert.strictEqual(res.appended, 1);
+
+  const s1 = fs.readFileSync(path.join(dataDir, 'work', 's1.jsonl'), 'utf8');
   assert.strictEqual(s1.trim().split('\n').length, 3);
-  assert.ok(fs.existsSync(path.join(dataDir, 's2.jsonl')));
+  assert.ok(fs.existsSync(path.join(dataDir, 'personal', 's2.jsonl')));
+  assert.ok(fs.existsSync(path.join(dataDir, '__personal', 's1.jsonl')));
+  fs.rmSync(path.join(dataDir, '__personal'), { recursive: true });
+
+  // A legacy file with no project, from before projects existed
+  fs.writeFileSync(path.join(dataDir, 'legacy.jsonl'), '{"msg":"old alpha"}\n');
+
+  // Projects and sessions
+  assert.deepStrictEqual(listProjects(dataDir), ['personal', 'work', '']);
+  let list = listSessions({ dataDir });
+  assert.strictEqual(list.length, 3);
+  list = listSessions({ dataDir, project: 'work' });
+  assert.strictEqual(list.length, 1);
+  assert.strictEqual(list[0].id, 's1');
+  assert.strictEqual(list[0].title, 'alpha one');
+  assert.strictEqual(list[0].createdAt, '2026-01-02T03:04:05.000Z');
+  assert.ok(list[0].updatedAt);
+  assert.strictEqual(listSessions({ dataDir, project: '' })[0].id, 'legacy');
+  const sess = await readSession({ dataDir, project: 'work', id: 's1' });
+  assert.strictEqual(sess.lines.length, 3);
+  assert.strictEqual(sess.lines[1].data.response, 'alpha two');
+  assert.strictEqual(await readSession({ dataDir, project: 'work', id: 'nope' }), null);
 
   // Search across both the ingest dir and the claude projects dir
-  let hits = await searchJsonl({ dirs: [dataDir, path.join(tmp, 'claude-projects')], query: 'alpha' });
+  let hits = await searchJsonl({ dirs: [dataDir, path.join(tmp, 'claude-projects')], query: 'alpha', dataDir });
+  assert.strictEqual(hits.length, 4);
+  const workHit = hits.find((h) => h.project === 'work');
+  assert.strictEqual(workHit.session, 's1');
+  hits = await searchJsonl({ dirs: [path.join(dataDir, 'work')], query: 'alpha' });
   assert.strictEqual(hits.length, 3);
+  hits = await searchJsonl({ dirs: [dataDir], query: 'alpha', recursive: false, dataDir });
+  assert.strictEqual(hits.length, 1);
+  assert.strictEqual(hits[0].project, '');
 
   hits = await searchJsonl({ dirs: [dataDir, path.join(tmp, 'claude-projects')], query: 'claude projects' });
   assert.strictEqual(hits.length, 1);
@@ -85,17 +127,17 @@ function post(port, body, headers = {}) {
   const authServer = await createIngestServer({ dataDir: authDir, port: 0, token: 'sekret' });
   const authPort = authServer.address().port;
 
-  res = await post(authPort, '{"msg":"locked"}\n', { 'x-session-id': 's3' });
+  res = await post(authPort, '{"msg":"locked"}\n', { 'x-session-id': 's3', 'x-project': 'p' });
   assert.strictEqual(res.status, 401);
 
-  res = await post(authPort, '{"msg":"locked"}\n', { 'x-session-id': 's3', authorization: 'Bearer wrong' });
+  res = await post(authPort, '{"msg":"locked"}\n', { 'x-session-id': 's3', 'x-project': 'p', authorization: 'Bearer wrong' });
   assert.strictEqual(res.status, 401);
-  assert.ok(!fs.existsSync(path.join(authDir, 's3.jsonl')));
+  assert.ok(!fs.existsSync(path.join(authDir, 'p', 's3.jsonl')));
 
-  res = await post(authPort, '{"msg":"unlocked"}\n', { 'x-session-id': 's3', authorization: 'Bearer sekret' });
+  res = await post(authPort, '{"msg":"unlocked"}\n', { 'x-session-id': 's3', 'x-project': 'p', authorization: 'Bearer sekret' });
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.appended, 1);
-  assert.ok(fs.existsSync(path.join(authDir, 's3.jsonl')));
+  assert.ok(fs.existsSync(path.join(authDir, 'p', 's3.jsonl')));
 
   authServer.close();
 
@@ -125,7 +167,23 @@ function post(port, body, headers = {}) {
   assert.strictEqual(r.data, '<p>scry ui</p>');
   r = await get('/search?q=alpha', basic('u', 'p'));
   assert.strictEqual(r.status, 200);
+  assert.strictEqual(JSON.parse(r.data).length, 4);
+  r = await get('/search?q=alpha&project=work', basic('u', 'p'));
   assert.strictEqual(JSON.parse(r.data).length, 3);
+  r = await get('/search?q=alpha&project=', basic('u', 'p'));
+  assert.strictEqual(JSON.parse(r.data).length, 1);
+  assert.strictEqual((await get('/projects')).status, 401);
+  r = await get('/projects', basic('u', 'p'));
+  assert.deepStrictEqual(JSON.parse(r.data), ['personal', 'work', '']);
+  r = await get('/sessions', basic('u', 'p'));
+  assert.strictEqual(JSON.parse(r.data).length, 3);
+  r = await get('/sessions?project=personal', basic('u', 'p'));
+  assert.deepStrictEqual(JSON.parse(r.data).map((x) => x.id), ['s2']);
+  r = await get('/session?project=work&id=s1', basic('u', 'p'));
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(JSON.parse(r.data).lines.length, 3);
+  assert.strictEqual((await get('/session?project=work&id=missing', basic('u', 'p'))).status, 404);
+  assert.strictEqual((await get('/session?project=..&id=s1', basic('u', 'p'))).status, 404);
   uiServer.close();
 
   server.close();

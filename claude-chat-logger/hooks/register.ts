@@ -1,18 +1,22 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 // One JSON object per line. Two kinds:
-//   { kind: "prompt",   ts, session_id, remote_session_id?, prompt }
-//   { kind: "response", ts, session_id, remote_session_id?, turn_id, reason, response, thinking? }
+//   { kind: "prompt",   ts, session_id, project?, remote_session_id?, prompt }
+//   { kind: "response", ts, session_id, project?, remote_session_id?, turn_id, reason, response, thinking? }
 // Prompts are logged when submitted, responses when the turn ends (any reason,
 // aborted and errored included), so a long or interrupted turn never loses the
 // prompt. remote_session_id is the claude.ai/code session id (session_01...),
 // resolved best-effort in cloud sessions; it is also the scry session key.
 const LOG = '$HOME/.claude/chat-log.jsonl'
 
-// HTTP ingestion is driven by two environment variables:
+// HTTP ingestion is driven by three environment variables:
 // SCRY_INGEST_URL — the scry ingest endpoint (hotwheels/scry), e.g.
 //   https://gagan.ngrok-free.app/ingest. Unset: no HTTP ingestion, local file only.
 // SCRY_INGEST_TOKEN — sent as Authorization: Bearer <token> when set.
+// SCRY_PROJECT — the scry project these sessions belong to, sent as X-Project.
+//   Required by scry: unset, HTTP ingestion is off (local file only) with a
+//   one-time warning. Use one project per Claude account to keep their
+//   sessions apart.
 
 // The claude.ai/code session id (session_01...), when this is a cloud session.
 let remoteSessionId = ''
@@ -60,8 +64,12 @@ async function appendLine($: EngineInterface, line: string): Promise<void> {
   if (r.exitCode !== 0) throw new Error(r.stderr.slice(0, 300))
 }
 
-async function ingest($: EngineInterface, url: string, line: string, sessionId: string): Promise<void> {
-  const headers: Record<string, string> = { 'X-Session-Id': sessionId, 'Content-Type': 'application/x-ndjson' }
+async function ingest($: EngineInterface, url: string, project: string, line: string, sessionId: string): Promise<void> {
+  const headers: Record<string, string> = {
+    'X-Session-Id': sessionId,
+    'X-Project': project,
+    'Content-Type': 'application/x-ndjson',
+  }
   const token = await $.env.get('SCRY_INGEST_TOKEN')
   if (token) headers['Authorization'] = `Bearer ${token}`
   const res = await $.http.fetch(url, { method: 'POST', headers, body: line + '\n' })
@@ -87,6 +95,11 @@ async function flushOutbox($: EngineInterface): Promise<void> {
       outbox.length = 0
       return
     }
+    const project = (await $.env.get('SCRY_PROJECT'))?.trim() ?? ''
+    if (project === '') {
+      outbox.length = 0
+      throw new Error('SCRY_PROJECT is not set')
+    }
     // The session key may resolve between queueing and flushing (the first
     // prompt is queued before the transcript holds the attribution reminder),
     // so re-resolve here and prefer it for routing.
@@ -94,7 +107,7 @@ async function flushOutbox($: EngineInterface): Promise<void> {
     while (outbox.length > 0) {
       const head = outbox[0]
       if (head === undefined) break
-      await ingest($, url, head.line, remoteSessionId !== '' ? remoteSessionId : head.sessionId)
+      await ingest($, url, project, head.line, remoteSessionId !== '' ? remoteSessionId : head.sessionId)
       outbox.shift()
     }
   } catch (err) {
@@ -112,9 +125,11 @@ async function flushOutbox($: EngineInterface): Promise<void> {
 async function logLine($: EngineInterface, fields: Record<string, unknown>): Promise<void> {
   await resolveRemoteSessionId($)
   const sessionId = await $.session.id()
+  const project = (await $.env.get('SCRY_PROJECT'))?.trim() ?? ''
   const obj = {
     ts: new Date().toISOString(),
     session_id: sessionId,
+    ...(project !== '' ? { project } : {}),
     ...(remoteSessionId !== '' ? { remote_session_id: remoteSessionId } : {}),
     ...fields,
   }

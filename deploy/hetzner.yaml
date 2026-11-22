@@ -22,6 +22,7 @@
 # Senders (claude-chat-logger) then use:
 #   SCRY_INGEST_URL=https://scry.teltrix.ai/ingest
 #   SCRY_INGEST_TOKEN=<same token>
+#   SCRY_PROJECT=<project, e.g. one per Claude account>   (required)
 # and cloud setup scripts download the plugin from https://scry.teltrix.ai/plugin.
 ---
 kind: PersistentVolumeClaim

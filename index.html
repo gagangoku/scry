@@ -2,76 +2,717 @@
 <html>
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Scry</title>
   <style>
-    body { font-family: -apple-system, sans-serif; margin: 0; padding: 16px; background: #1e1e1e; color: #ddd; }
-    #bar { display: flex; gap: 8px; }
-    input { flex: 1; padding: 8px 12px; font-size: 15px; border-radius: 6px; border: 1px solid #444; background: #2a2a2a; color: #eee; }
-    button { padding: 8px 16px; border-radius: 6px; border: none; background: #0a84ff; color: white; font-size: 15px; cursor: pointer; }
-    #meta { margin: 10px 0; color: #888; font-size: 13px; }
-    .hit { padding: 8px 10px; border-bottom: 1px solid #333; }
-    .hit .loc { color: #6ab0f3; font-size: 12px; word-break: break-all; }
-    .hit .snippet { font-family: ui-monospace, monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; margin-top: 2px; }
+    :root {
+      --bg: #0f1115;
+      --panel: #151820;
+      --panel-2: #1b1f29;
+      --hover: #212634;
+      --active: #262c3d;
+      --border: #262b36;
+      --text: #e6e8ee;
+      --muted: #8a91a3;
+      --faint: #5d6475;
+      --accent: #6d8cff;
+      --accent-2: #8b6dff;
+      --user-bubble: linear-gradient(135deg, #5a7bff, #7b5cff);
+      --user-text: #fff;
+      --agent-bubble: #1b1f29;
+      --code-bg: #0b0d12;
+      --warn: #f0a35e;
+      --ok: #4fc08d;
+      --mark: rgba(255, 213, 79, .28);
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.18);
+      color-scheme: dark;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f6f7fb;
+        --panel: #ffffff;
+        --panel-2: #f1f3f8;
+        --hover: #eef0f6;
+        --active: #e4e8f5;
+        --border: #e2e5ee;
+        --text: #1b1f2a;
+        --muted: #636b7e;
+        --faint: #9aa1b2;
+        --agent-bubble: #ffffff;
+        --code-bg: #f3f4f8;
+        --mark: rgba(255, 196, 0, .35);
+        --shadow: 0 1px 2px rgba(20,30,60,.06), 0 4px 16px rgba(20,30,60,.06);
+        color-scheme: light;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    button, input, select { font: inherit; color: inherit; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    /* Header */
+    header {
+      display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+      background: var(--panel); border-bottom: 1px solid var(--border); flex: none;
+    }
+    .brand { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 16px; letter-spacing: .2px; white-space: nowrap; }
+    .brand .orb {
+      width: 22px; height: 22px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #c9d4ff, var(--accent) 45%, var(--accent-2) 100%);
+      box-shadow: 0 0 12px rgba(109,140,255,.55);
+    }
+    .select-wrap { position: relative; }
+    .select-wrap::after {
+      content: ""; position: absolute; right: 11px; top: 50%; width: 6px; height: 6px; margin-top: -5px;
+      border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg); pointer-events: none;
+    }
+    select {
+      appearance: none; padding: 7px 30px 7px 12px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--panel-2); cursor: pointer; max-width: 220px;
+    }
+    .search {
+      flex: 1; display: flex; align-items: center; gap: 8px; max-width: 640px;
+      padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2);
+    }
+    .search:focus-within, select:focus, .filter:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(109,140,255,.18); }
+    .search input { flex: 1; border: 0; background: transparent; padding: 7px 0; outline: none; min-width: 0; }
+    .search svg { flex: none; color: var(--faint); }
+    kbd { font: 11px ui-monospace, monospace; color: var(--faint); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+    .icon-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2);
+      cursor: pointer; color: var(--muted); white-space: nowrap;
+    }
+    .icon-btn:hover { background: var(--hover); color: var(--text); }
+    .spacer { flex: 1; }
+
+    /* Layout */
+    main { flex: 1; display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
+    aside { display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--panel); min-height: 0; }
+    .aside-head { padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 8px; }
+    .aside-title { display: flex; align-items: baseline; justify-content: space-between; padding: 0 4px; }
+    .aside-title h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+    .count { font-size: 12px; color: var(--faint); }
+    .filter { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); }
+    #sessions { overflow-y: auto; padding: 4px 8px 16px; flex: 1; }
+    .sess {
+      display: block; width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer;
+      padding: 10px 10px; border-radius: 10px; margin-bottom: 2px; border: 1px solid transparent;
+    }
+    .sess:hover { background: var(--hover); }
+    .sess.active { background: var(--active); border-color: var(--border); }
+    .sess .title { font-weight: 550; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .sess .id { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+    .sess .times { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--faint); margin-top: 4px; }
+    .sess .times span { white-space: nowrap; }
+    .chip {
+      display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+      background: rgba(109,140,255,.14); color: var(--accent); font-weight: 550; vertical-align: 1px;
+    }
+    .chip.none { background: var(--panel-2); color: var(--muted); }
+    .chip.warn { background: rgba(240,163,94,.15); color: var(--warn); }
+
+    #content { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+    .empty {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+      color: var(--muted); text-align: center; padding: 24px;
+    }
+    .empty .big-orb { width: 64px; height: 64px; border-radius: 50%; opacity: .9;
+      background: radial-gradient(circle at 35% 30%, #c9d4ff, var(--accent) 45%, var(--accent-2) 100%);
+      box-shadow: 0 0 40px rgba(109,140,255,.45); margin-bottom: 8px; }
+    .empty h3 { margin: 0; color: var(--text); font-weight: 600; }
+    .empty p { margin: 0; max-width: 440px; font-size: 13px; }
+    .placeholder { padding: 24px; color: var(--muted); text-align: center; font-size: 13px; }
+
+    /* Session view */
+    .chat-head {
+      flex: none; display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+      border-bottom: 1px solid var(--border); background: var(--panel);
+    }
+    .chat-head .info { min-width: 0; flex: 1; }
+    .chat-head h1 { margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chat-head .sub { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .back { display: none; }
+    #scroller { flex: 1; overflow-y: auto; scroll-behavior: smooth; }
+    .thread { max-width: 920px; margin: 0 auto; padding: 24px 20px 64px; display: flex; flex-direction: column; gap: 14px; }
+    .day { align-self: center; font-size: 11.5px; color: var(--faint); background: var(--panel-2); padding: 2px 12px; border-radius: 999px; margin: 8px 0; }
+    .msg { display: flex; gap: 10px; max-width: 100%; border-radius: 14px; transition: background .6s; }
+    .msg.user { flex-direction: row-reverse; }
+    .avatar {
+      flex: none; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; margin-top: 2px;
+    }
+    .msg.agent .avatar { background: radial-gradient(circle at 35% 30%, #c9d4ff, var(--accent) 50%, var(--accent-2)); color: #fff; }
+    .msg.user .avatar { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+    .stack { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: min(760px, 85%); }
+    .msg.user .stack { align-items: flex-end; }
+    .bubble { padding: 10px 14px; border-radius: 16px; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
+    .msg.user .bubble { background: var(--user-bubble); color: var(--user-text); border-bottom-right-radius: 5px; white-space: pre-wrap; box-shadow: var(--shadow); }
+    .msg.agent .bubble { background: var(--agent-bubble); border: 1px solid var(--border); border-bottom-left-radius: 5px; box-shadow: var(--shadow); }
+    .meta { font-size: 11px; color: var(--faint); padding: 0 6px; display: flex; gap: 6px; align-items: center; }
+    .msg.highlight { background: var(--mark); }
+    details.thinking, details.tool, details.event {
+      border: 1px dashed var(--border); border-radius: 10px; padding: 6px 10px; font-size: 13px; color: var(--muted); max-width: 100%;
+    }
+    details.tool { border-style: solid; background: var(--panel-2); }
+    details summary { cursor: pointer; user-select: none; list-style: none; display: flex; align-items: center; gap: 6px; }
+    details summary::-webkit-details-marker { display: none; }
+    details summary::before { content: "▸"; font-size: 10px; transition: transform .15s; }
+    details[open] summary::before { transform: rotate(90deg); }
+    details .body { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    details pre { margin: 6px 0 0; max-height: 360px; overflow: auto; }
+    .event-row { align-self: center; max-width: 90%; }
+    .sys { align-self: center; font-size: 12px; color: var(--muted); background: var(--panel-2); padding: 4px 12px; border-radius: 999px; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Markdown */
+    .md > :first-child { margin-top: 0; }
+    .md > :last-child { margin-bottom: 0; }
+    .md p { margin: 0 0 .7em; }
+    .md h1, .md h2, .md h3, .md h4 { margin: 1em 0 .4em; line-height: 1.3; }
+    .md h1 { font-size: 1.3em; } .md h2 { font-size: 1.15em; } .md h3, .md h4 { font-size: 1em; }
+    .md ul, .md ol { margin: 0 0 .7em; padding-left: 1.4em; }
+    .md li { margin: .15em 0; }
+    .md a { color: var(--accent); }
+    .md blockquote { margin: 0 0 .7em; padding-left: 12px; border-left: 3px solid var(--border); color: var(--muted); }
+    .md code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code-bg); padding: 1px 5px; border-radius: 5px; }
+    pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; overflow-x: auto; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    pre code { background: none; padding: 0; }
+    .md pre { margin: 0 0 .7em; }
+    .md table { border-collapse: collapse; margin: 0 0 .7em; display: block; overflow-x: auto; }
+    .md th, .md td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+    .md hr { border: 0; border-top: 1px solid var(--border); margin: 1em 0; }
+
+    /* Search results */
+    .results { max-width: 980px; width: 100%; margin: 0 auto; padding: 16px 20px 48px; }
+    .results-head { font-size: 13px; color: var(--muted); margin: 4px 0 12px; }
+    .hit {
+      display: block; width: 100%; text-align: left; cursor: pointer; padding: 10px 12px; margin-bottom: 8px;
+      border-radius: 10px; border: 1px solid var(--border); background: var(--panel);
+    }
+    .hit:hover { border-color: var(--accent); }
+    .hit.static { cursor: default; }
+    .hit.static:hover { border-color: var(--border); }
+    .hit .loc { font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .hit .snippet { font-size: 12.5px; white-space: pre-wrap; word-break: break-all; margin-top: 4px; }
+    mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
+
+    @media (max-width: 760px) {
+      header { flex-wrap: wrap; }
+      .search { order: 3; flex-basis: 100%; max-width: none; }
+      .hide-sm { display: none; }
+      main { grid-template-columns: 1fr; }
+      body.viewing aside { display: none; }
+      body:not(.viewing) #content { display: none; }
+      .back { display: inline-flex; }
+      .stack { max-width: 90%; }
+    }
   </style>
 </head>
 <body>
-  <div id="bar">
-    <input id="q" placeholder="Search session JSONL files…" autofocus />
-    <button id="go">Search</button>
-  </div>
-  <div id="meta"></div>
-  <div id="results"></div>
-  <script>
-    const q = document.getElementById('q');
-    const meta = document.getElementById('meta');
-    const results = document.getElementById('results');
+  <header>
+    <div class="brand"><div class="orb"></div>Scry</div>
+    <div class="select-wrap">
+      <select id="project" title="Project"></select>
+    </div>
+    <label class="search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" placeholder="Search transcripts…" autocomplete="off" />
+      <kbd class="hide-sm">/</kbd>
+    </label>
+    <div class="spacer"></div>
+    <button class="icon-btn" id="refresh" title="Refresh">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+      <span class="hide-sm">Refresh</span>
+    </button>
+  </header>
 
+  <main>
+    <aside>
+      <div class="aside-head">
+        <div class="aside-title"><h2>Sessions</h2><span class="count" id="count"></span></div>
+        <input class="filter" id="filter" placeholder="Filter by name or id…" autocomplete="off" />
+      </div>
+      <div id="sessions"><div class="placeholder">Loading…</div></div>
+    </aside>
+    <section id="content"></section>
+  </main>
+
+  <script>
     // In Electron, preload.js exposes window.api; in a browser (server.js),
     // the same calls go over HTTP to the page's own origin.
+    // `project` null means every project; '' means legacy files with no project.
+    const getJson = async (p) => {
+      const res = await fetch(p);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    };
+    const projParam = (project) => (project === null ? '' : 'project=' + encodeURIComponent(project));
     const api = window.api || {
       config: async () => null,
-      search: async (query) => {
-        const res = await fetch('search?q=' + encodeURIComponent(query));
-        if (!res.ok) throw new Error(`search failed: HTTP ${res.status}`);
-        return res.json();
-      },
+      projects: () => getJson('projects'),
+      sessions: (project) => getJson('sessions?' + projParam(project)),
+      session: (project, id) => getJson(`session?${projParam(project)}&id=${encodeURIComponent(id)}`),
+      search: (query, project) => getJson(`search?q=${encodeURIComponent(query)}&${projParam(project)}`),
     };
 
-    api.config().then((cfg) => {
-      meta.textContent = cfg
-        ? `Ingest: POST JSONL to http://${cfg.HOST}:${cfg.PORT}/ingest — searching: ${cfg.SEARCH_DIRS.join(', ')}`
-        : `Ingest: POST JSONL to ${new URL('ingest', location.href)}`;
-    });
+    const $ = (id) => document.getElementById(id);
+    const projectSel = $('project');
+    const qInput = $('q');
+    const filterInput = $('filter');
+    const listEl = $('sessions');
+    const content = $('content');
+    const ALL = '__all__';
+    const NONE = '__none__';
 
-    async function run() {
-      const query = q.value.trim();
-      if (!query) return;
-      results.textContent = 'Searching…';
-      let hits;
+    const store = {
+      get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+      set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* ignore */ } },
+    };
+
+    let sessions = [];
+    let current = null; // { project, id }
+
+    const selectedProject = () => {
+      const v = projectSel.value;
+      return v === ALL || !v ? null : v === NONE ? '' : v;
+    };
+    const projectLabel = (p) => (p === '' ? 'no project' : p);
+    const projectChip = (p) => el('span', { className: 'chip' + (p === '' ? ' none' : '') }, projectLabel(p));
+
+    function el(tag, props = {}, ...children) {
+      const n = document.createElement(tag);
+      for (const [k, v] of Object.entries(props)) {
+        if (k === 'dataset') Object.assign(n.dataset, v);
+        else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+        else n[k] = v;
+      }
+      for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) n.append(c);
+      return n;
+    }
+
+    // ---------- time formatting ----------
+    const fmtFull = (iso) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    const fmtTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    const fmtDay = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    function fmtRel(iso) {
+      const s = (Date.now() - new Date(iso).getTime()) / 1000;
+      if (s < 45) return 'just now';
+      if (s < 3600) return `${Math.round(s / 60)}m ago`;
+      if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+      if (s < 86400 * 7) return `${Math.round(s / 86400)}d ago`;
+      return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    const fmtShort = (iso) => new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+    // ---------- markdown (escape first, then a small safe subset) ----------
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    function inline(s) {
+      const codes = [];
+      s = s.replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
+      s = esc(s)
+        .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t, u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>`)
+        .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, pre, u) => `${pre}<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`)
+        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>')
+        .replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+      return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${esc(codes[+i])}</code>`);
+    }
+    function markdown(src) {
+      const lines = String(src).replace(/\r\n?/g, '\n').split('\n');
+      let html = '';
+      let i = 0;
+      const isTableSep = (l) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
+      const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      while (i < lines.length) {
+        const line = lines[i];
+        let m;
+        if ((m = /^\s*(```+|~~~+)\s*([\w+-]*)/.exec(line))) {
+          const fence = m[1];
+          const buf = [];
+          i++;
+          while (i < lines.length && !lines[i].trim().startsWith(fence)) buf.push(lines[i++]);
+          i++;
+          html += `<pre><code>${esc(buf.join('\n'))}</code></pre>`;
+        } else if (!line.trim()) {
+          i++;
+        } else if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) {
+          const lvl = Math.min(m[1].length, 4);
+          html += `<h${lvl}>${inline(m[2])}</h${lvl}>`;
+          i++;
+        } else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+          html += '<hr>';
+          i++;
+        } else if (/^\s*>/.test(line)) {
+          const buf = [];
+          while (i < lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ''));
+          html += `<blockquote>${markdown(buf.join('\n'))}</blockquote>`;
+        } else if (line.includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+          const head = cells(line);
+          i += 2;
+          let body = '';
+          while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+            body += '<tr>' + cells(lines[i++]).map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>';
+          }
+          html += `<table><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`;
+        } else if ((m = /^(\s*)([-*+]|\d+[.)])\s+/.exec(line))) {
+          const ordered = /\d/.test(m[2]);
+          const items = [];
+          while (i < lines.length) {
+            const lm = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(lines[i]);
+            if (lm && lm[1].length <= m[1].length + 1) { items.push(lm[3]); i++; }
+            else if (lines[i].trim() && /^\s+/.test(lines[i]) && items.length) { items[items.length - 1] += '\n' + lines[i].trim(); i++; }
+            else break;
+          }
+          const tag = ordered ? 'ol' : 'ul';
+          html += `<${tag}>${items.map((t) => `<li>${inline(t).replace(/\n/g, '<br>')}</li>`).join('')}</${tag}>`;
+        } else {
+          const buf = [];
+          while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|\s*(```|~~~)|\s*>|\s*([-*+]|\d+[.)])\s)/.test(lines[i])) buf.push(lines[i++]);
+          if (!buf.length) buf.push(lines[i++]);
+          html += `<p>${buf.map(inline).join('<br>')}</p>`;
+        }
+      }
+      return html;
+    }
+    const mdNode = (text) => { const d = el('div', { className: 'md' }); d.innerHTML = markdown(text); return d; };
+
+    // ---------- projects ----------
+    async function loadProjects() {
+      let projects = [];
+      try { projects = await api.projects(); } catch (_) { /* keep empty */ }
+      const saved = store.get('scry.project');
+      const prev = projectSel.value || saved || ALL;
+      projectSel.innerHTML = '';
+      projectSel.append(el('option', { value: ALL }, 'All projects'));
+      for (const p of projects) {
+        projectSel.append(el('option', { value: p === '' ? NONE : p }, p === '' ? '(no project)' : p));
+      }
+      projectSel.value = [...projectSel.options].some((o) => o.value === prev) ? prev : ALL;
+    }
+
+    // ---------- session list ----------
+    async function loadSessions() {
       try {
-        hits = await api.search(query);
+        sessions = await api.sessions(selectedProject());
       } catch (err) {
-        results.textContent = err.message;
+        listEl.innerHTML = '';
+        listEl.append(el('div', { className: 'placeholder' }, `Could not load sessions: ${err.message}`));
         return;
       }
-      results.innerHTML = '';
-      meta.textContent = `${hits.length} result(s)`;
-      for (const h of hits) {
-        const div = document.createElement('div');
-        div.className = 'hit';
-        const loc = document.createElement('div');
-        loc.className = 'loc';
-        loc.textContent = `${h.file}:${h.line}`;
-        const snippet = document.createElement('div');
-        snippet.className = 'snippet';
-        snippet.textContent = h.snippet;
-        div.append(loc, snippet);
-        results.append(div);
+      renderList();
+    }
+
+    function renderList() {
+      const f = filterInput.value.trim().toLowerCase();
+      const shown = f
+        ? sessions.filter((s) => (s.title + ' ' + s.id + ' ' + s.project).toLowerCase().includes(f))
+        : sessions;
+      $('count').textContent = sessions.length ? (f ? `${shown.length} of ${sessions.length}` : `${sessions.length}`) : '';
+      listEl.innerHTML = '';
+      if (!shown.length) {
+        listEl.append(el('div', { className: 'placeholder' }, sessions.length ? 'No sessions match.' : 'No sessions yet.'));
+        return;
+      }
+      const showProject = selectedProject() === null;
+      for (const s of shown) {
+        const active = current && current.id === s.id && current.project === s.project;
+        listEl.append(el('button', {
+          className: 'sess' + (active ? ' active' : ''),
+          title: `${s.id}\nCreated ${fmtFull(s.createdAt)}\nUpdated ${fmtFull(s.updatedAt)}`,
+          onclick: () => openSession(s.project, s.id),
+        },
+          el('div', { className: 'title' }, s.title || s.id),
+          el('div', { className: 'id mono' }, showProject ? [projectChip(s.project), ' '] : null, s.title ? s.id : ''),
+          el('div', { className: 'times' },
+            el('span', {}, 'Created ', fmtShort(s.createdAt)),
+            el('span', {}, 'Updated ', fmtRel(s.updatedAt)),
+          ),
+        ));
       }
     }
 
-    document.getElementById('go').addEventListener('click', run);
-    q.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+    // ---------- routing ----------
+    function setHash(params) {
+      const h = new URLSearchParams(params).toString();
+      if (location.hash.slice(1) !== h) history.pushState(null, '', h ? '#' + h : location.pathname + location.search);
+    }
+    function route() {
+      const h = new URLSearchParams(location.hash.slice(1));
+      if (h.has('s')) {
+        showSession(h.get('p') || '', h.get('s'), h.get('l') ? Number(h.get('l')) : null);
+      } else if (h.has('q')) {
+        qInput.value = h.get('q');
+        showSearch(h.get('q'));
+      } else {
+        current = null;
+        document.body.classList.remove('viewing');
+        renderList();
+        showEmpty();
+      }
+    }
+    function openSession(project, id, line) {
+      setHash({ s: id, p: project, ...(line ? { l: line } : {}) });
+      route();
+    }
+
+    function showEmpty() {
+      content.innerHTML = '';
+      content.append(el('div', { className: 'empty' },
+        el('div', { className: 'big-orb' }),
+        el('h3', {}, 'Pick a session'),
+        el('p', {}, 'Choose a session on the left to read its full log, or search across transcripts above. Use the project menu to switch between accounts.'),
+      ));
+    }
+
+    // ---------- session view ----------
+    function textOf(content) {
+      if (typeof content === 'string') return content;
+      if (Array.isArray(content)) return content.filter((b) => b && b.type === 'text').map((b) => b.text).join('\n\n');
+      return '';
+    }
+    const stringify = (v) => (typeof v === 'string' ? v : JSON.stringify(v, null, 2));
+    const detailsBlock = (cls, label, bodyNode) =>
+      el('details', { className: cls }, el('summary', {}, label), bodyNode);
+
+    function userMsg(text, ts, line) {
+      return el('div', { className: 'msg user', dataset: { line } },
+        el('div', { className: 'avatar' }, 'You'),
+        el('div', { className: 'stack' },
+          el('div', { className: 'bubble' }, text),
+          ts ? el('div', { className: 'meta', title: fmtFull(ts) }, fmtTime(ts)) : null,
+        ));
+    }
+    function agentMsg(parts, ts, line, badge) {
+      return el('div', { className: 'msg agent', dataset: { line } },
+        el('div', { className: 'avatar' }, 'AI'),
+        el('div', { className: 'stack' },
+          ...parts,
+          (ts || badge) ? el('div', { className: 'meta' },
+            ts ? el('span', { title: fmtFull(ts) }, fmtTime(ts)) : null,
+            badge || null) : null,
+        ));
+    }
+    const bubble = (node) => el('div', { className: 'bubble' }, node);
+    const thinkingBlock = (t) => detailsBlock('thinking', 'Thinking', el('div', { className: 'body' }, t));
+    const toolUseBlock = (b) => detailsBlock('tool', ['🔧 ', el('span', { className: 'mono' }, b.name || 'tool')],
+      el('pre', {}, stringify(b.input)));
+    const toolResultBlock = (b) => detailsBlock('tool', ['↩ ', b.is_error ? 'Tool error' : 'Tool result'],
+      el('pre', {}, typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((c) => c.text || stringify(c)).join('\n') : stringify(b.content)));
+
+    // One rendered row (or null) per stored line. Understands the chat-logger
+    // format ({kind: prompt|response}) and raw Claude Code transcript lines
+    // ({type: user|assistant, message}); anything else shows as a raw event.
+    function renderLine({ line, data, raw }) {
+      if (data === undefined) {
+        return el('div', { className: 'event-row', dataset: { line } },
+          detailsBlock('event', `Unparsed line ${line}`, el('pre', {}, raw)));
+      }
+      const ts = data.ts || data.timestamp || null;
+      if (data.kind === 'prompt') return userMsg(data.prompt || '', ts, line);
+      if (data.kind === 'response') {
+        const parts = [];
+        if (data.thinking) parts.push(thinkingBlock(data.thinking));
+        if (data.response) parts.push(bubble(mdNode(data.response)));
+        const reason = String(data.reason || '');
+        const badge = /abort|error|interrupt|cancel|fail/i.test(reason) ? el('span', { className: 'chip warn' }, reason) : null;
+        return agentMsg(parts.length ? parts : [bubble(el('em', {}, '(empty response)'))], ts, line, badge);
+      }
+      if ((data.type === 'user' || data.type === 'assistant') && data.message) {
+        const c = data.message.content;
+        const blocks = Array.isArray(c) ? c : [{ type: 'text', text: typeof c === 'string' ? c : stringify(c) }];
+        if (data.type === 'user') {
+          const text = textOf(blocks);
+          const tools = blocks.filter((b) => b && b.type === 'tool_result');
+          if (text && !tools.length) return userMsg(text, ts, line);
+          if (tools.length) return agentMsg(tools.map(toolResultBlock), ts, line);
+          return null;
+        }
+        const parts = [];
+        for (const b of blocks) {
+          if (!b) continue;
+          if (b.type === 'text' && b.text) parts.push(bubble(mdNode(b.text)));
+          else if (b.type === 'thinking' && b.thinking) parts.push(thinkingBlock(b.thinking));
+          else if (b.type === 'tool_use') parts.push(toolUseBlock(b));
+        }
+        return parts.length ? agentMsg(parts, ts, line) : null;
+      }
+      if (data.type === 'summary' && data.summary) {
+        return el('div', { className: 'sys', dataset: { line }, title: data.summary }, '📝 ', data.summary);
+      }
+      const label = data.kind || data.type || data.msg || 'event';
+      return el('div', { className: 'event-row', dataset: { line } },
+        detailsBlock('event', [String(label).slice(0, 80), ts ? ` · ${fmtTime(ts)}` : ''], el('pre', {}, stringify(data))));
+    }
+
+    let loadSeq = 0;
+    async function showSession(project, id, highlightLine) {
+      current = { project, id };
+      document.body.classList.add('viewing');
+      renderList();
+      const seq = ++loadSeq;
+      content.innerHTML = '';
+      content.append(el('div', { className: 'placeholder' }, 'Loading session…'));
+      let s;
+      try {
+        s = await api.session(project, id);
+      } catch (err) {
+        if (seq !== loadSeq) return;
+        content.innerHTML = '';
+        content.append(el('div', { className: 'placeholder' }, `Could not load session: ${err.message}`));
+        return;
+      }
+      if (seq !== loadSeq) return;
+      content.innerHTML = '';
+      if (!s) {
+        content.append(el('div', { className: 'placeholder' }, 'Session not found.'));
+        return;
+      }
+
+      const backBtn = el('button', { className: 'icon-btn back', onclick: () => { setHash({}); route(); } }, '← Back');
+      const copyBtn = el('button', {
+        className: 'icon-btn', title: 'Copy session id',
+        onclick: async () => {
+          try { await navigator.clipboard.writeText(s.id); copyBtn.textContent = 'Copied'; } catch (_) { copyBtn.textContent = 'Copy failed'; }
+          setTimeout(() => { copyBtn.textContent = 'Copy id'; }, 1200);
+        },
+      }, 'Copy id');
+      content.append(el('div', { className: 'chat-head' },
+        backBtn,
+        el('div', { className: 'info' },
+          el('h1', { title: s.title || s.id }, s.title || s.id),
+          el('div', { className: 'sub' },
+            projectChip(s.project),
+            el('span', { className: 'mono' }, s.id),
+            el('span', { title: fmtFull(s.createdAt) }, 'Created ', fmtFull(s.createdAt)),
+            el('span', { title: fmtFull(s.updatedAt) }, 'Updated ', fmtRel(s.updatedAt)),
+            el('span', {}, `${s.lines.length} entries`),
+          ),
+        ),
+        copyBtn,
+      ));
+
+      const thread = el('div', { className: 'thread' });
+      let lastDay = '';
+      for (const entry of s.lines) {
+        const ts = entry.data && (entry.data.ts || entry.data.timestamp);
+        if (ts && !Number.isNaN(Date.parse(ts))) {
+          const day = fmtDay(ts);
+          if (day !== lastDay) { thread.append(el('div', { className: 'day' }, day)); lastDay = day; }
+        }
+        const node = renderLine(entry);
+        if (node) thread.append(node);
+      }
+      if (!s.lines.length) thread.append(el('div', { className: 'placeholder' }, 'This session is empty.'));
+      const scroller = el('div', { id: 'scroller' }, thread);
+      content.append(scroller);
+
+      requestAnimationFrame(() => {
+        const target = highlightLine ? thread.querySelector(`[data-line="${highlightLine}"]`) : null;
+        scroller.style.scrollBehavior = 'auto';
+        if (target) {
+          target.scrollIntoView({ block: 'center' });
+          target.classList.add('highlight');
+          setTimeout(() => target.classList.remove('highlight'), 2500);
+        } else {
+          scroller.scrollTop = scroller.scrollHeight;
+        }
+        scroller.style.scrollBehavior = '';
+      });
+    }
+
+    // ---------- search ----------
+    function highlight(snippet, query) {
+      const frag = document.createDocumentFragment();
+      const lower = snippet.toLowerCase();
+      const q = query.toLowerCase();
+      let pos = 0;
+      let idx;
+      while (q && (idx = lower.indexOf(q, pos)) !== -1) {
+        frag.append(snippet.slice(pos, idx), el('mark', {}, snippet.slice(idx, idx + q.length)));
+        pos = idx + q.length;
+      }
+      frag.append(snippet.slice(pos));
+      return frag;
+    }
+
+    let searchSeq = 0;
+    async function showSearch(query) {
+      current = null;
+      document.body.classList.add('viewing');
+      renderList();
+      const seq = ++searchSeq;
+      content.innerHTML = '';
+      const wrap = el('div', { className: 'results' }, el('div', { className: 'results-head' }, 'Searching…'));
+      content.append(el('div', { id: 'scroller' }, wrap));
+      let hits;
+      try {
+        hits = await api.search(query, selectedProject());
+      } catch (err) {
+        if (seq !== searchSeq) return;
+        wrap.firstChild.textContent = `Search failed: ${err.message}`;
+        return;
+      }
+      if (seq !== searchSeq) return;
+      const scope = selectedProject() === null ? 'all projects' : projectLabel(selectedProject());
+      wrap.firstChild.textContent = `${hits.length}${hits.length >= 200 ? '+' : ''} result${hits.length === 1 ? '' : 's'} for “${query}” in ${scope}`;
+      for (const h of hits) {
+        const linked = h.session !== undefined;
+        wrap.append(el('button', {
+          className: 'hit' + (linked ? '' : ' static'),
+          onclick: linked ? () => openSession(h.project, h.session, h.line) : null,
+        },
+          el('div', { className: 'loc' },
+            linked ? [projectChip(h.project), el('span', { className: 'mono' }, `${h.session} · line ${h.line}`)]
+              : el('span', { className: 'mono' }, `${h.file}:${h.line}`)),
+          el('div', { className: 'snippet mono' }, highlight(h.snippet, query)),
+        ));
+      }
+    }
+
+    function runSearch() {
+      const query = qInput.value.trim();
+      if (!query) return;
+      setHash({ q: query });
+      route();
+    }
+
+    // ---------- wiring ----------
+    qInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') runSearch();
+      if (e.key === 'Escape') { qInput.value = ''; qInput.blur(); }
+    });
+    filterInput.addEventListener('input', renderList);
+    projectSel.addEventListener('change', async () => {
+      store.set('scry.project', projectSel.value);
+      await loadSessions();
+      const h = new URLSearchParams(location.hash.slice(1));
+      if (h.has('q')) showSearch(h.get('q'));
+    });
+    $('refresh').addEventListener('click', async () => {
+      await loadProjects();
+      await loadSessions();
+      route();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+        e.preventDefault();
+        qInput.focus();
+      }
+    });
+    window.addEventListener('popstate', route);
+    // Keep the list fresh while the window is visible.
+    setInterval(() => { if (!document.hidden) loadSessions(); }, 20000);
+
+    (async () => {
+      await loadProjects();
+      await loadSessions();
+      route();
+    })();
   </script>
 </body>
 </html>
