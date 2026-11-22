@@ -8,12 +8,15 @@
 #
 # Create the app secret once (never commit real values):
 #   kubectl create secret generic scry-env \
-#     --from-literal=SCRY_INGEST_TOKEN=... \
 #     --from-literal=SCRY_USER=... --from-literal=SCRY_PASS=...
 #
-# Only the keys listed under env: below reach the container. All three are
-# required (the pod won't start without them), so /ingest and the search UI are
-# never served without auth. GET /plugin and /healthz stay unauthenticated.
+# Only the keys listed under env: below reach the container. Both are required
+# (the pod won't start without them), so the UI is never served without auth.
+# Ingest tokens are not part of the deployment: each project gets its own,
+# created in the UI (New project / Token) and stored hashed on the volume, so
+# /ingest only accepts senders holding a project's token. GET /plugin and
+# /healthz stay unauthenticated. A SCRY_INGEST_TOKEN key left in an older
+# scry-env secret is ignored.
 #
 # Deploy / update:
 #   kubectl apply -f deploy/hetzner.yaml
@@ -21,8 +24,8 @@
 #
 # Senders (claude-chat-logger) then use:
 #   SCRY_INGEST_URL=https://scry.teltrix.ai/ingest
-#   SCRY_INGEST_TOKEN=<same token>
-#   SCRY_PROJECT=<project, e.g. one per Claude account>   (required)
+#   SCRY_PROJECT=<project created in the UI, e.g. one per Claude account>
+#   SCRY_INGEST_TOKEN=<that project's token, shown when it is created>
 # and cloud setup scripts download the plugin from https://scry.teltrix.ai/plugin.
 ---
 kind: PersistentVolumeClaim
@@ -75,11 +78,6 @@ spec:
             - name: http
               containerPort: 9999
           env:
-            - name: SCRY_INGEST_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: scry-env
-                  key: SCRY_INGEST_TOKEN
             - name: SCRY_USER
               valueFrom:
                 secretKeyRef:

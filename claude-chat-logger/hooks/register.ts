@@ -12,7 +12,8 @@ const LOG = '$HOME/.claude/chat-log.jsonl'
 // HTTP ingestion is driven by three environment variables:
 // SCRY_INGEST_URL — the scry ingest endpoint (hotwheels/scry), e.g.
 //   https://gagan.ngrok-free.app/ingest. Unset: no HTTP ingestion, local file only.
-// SCRY_INGEST_TOKEN — sent as Authorization: Bearer <token> when set.
+// SCRY_INGEST_TOKEN — the project's token from scry (New project / Token),
+//   sent as Authorization: Bearer <token>.
 // SCRY_PROJECT — the scry project these sessions belong to, sent as X-Project.
 //   Required by scry: unset, HTTP ingestion is off (local file only) with a
 //   one-time warning. Use one project per Claude account to keep their

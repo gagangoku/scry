@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const os = require('os');
 const {
-  createIngestServer, searchJsonl, listProjects, listSessions, readSession, projectDir, sanitizeProject,
+  createIngestServer, searchJsonl, projectInfo, createProject, rotateProjectToken, listSessions, readSession, projectDir, sanitizeProject,
 } = require('./lib/core');
 
 // All configuration lives here.
@@ -15,8 +15,6 @@ const CONFIG = {
     path.join(os.homedir(), '.claude', 'projects'),
   ],
   MAX_RESULTS: 200,
-  // When set, /ingest requires Authorization: Bearer <token>.
-  INGEST_TOKEN: process.env.SCRY_INGEST_TOKEN || '',
   // Served as a tar.gz at GET /plugin.
   PLUGIN_DIR: path.join(__dirname, 'claude-chat-logger'),
 };
@@ -37,7 +35,6 @@ app.whenReady().then(async () => {
     dataDir: CONFIG.DATA_DIR,
     port: CONFIG.PORT,
     host: CONFIG.HOST,
-    token: CONFIG.INGEST_TOKEN,
     pluginDir: CONFIG.PLUGIN_DIR,
   });
 
@@ -53,13 +50,18 @@ app.whenReady().then(async () => {
       recursive: p !== '',
     });
   });
-  ipcMain.handle('projects', () => listProjects(CONFIG.DATA_DIR));
+  ipcMain.handle('projects', () => projectInfo(CONFIG.DATA_DIR));
+  // Errors come back as { error } so the message survives IPC.
+  const guarded = (fn) => (_event, name) => {
+    try { return fn(CONFIG.DATA_DIR, String(name || '')); } catch (err) { return { error: err.message }; }
+  };
+  ipcMain.handle('createProject', guarded(createProject));
+  ipcMain.handle('rotateToken', guarded(rotateProjectToken));
   ipcMain.handle('sessions', (_event, project) => listSessions({ dataDir: CONFIG.DATA_DIR, project: proj(project) }));
   ipcMain.handle('session', (_event, project, id) =>
     readSession({ dataDir: CONFIG.DATA_DIR, project: proj(project) || '', id })
   );
-  // The token stays out of the renderer.
-  ipcMain.handle('config', () => ({ ...CONFIG, INGEST_TOKEN: undefined }));
+  ipcMain.handle('config', () => CONFIG);
 
   createWindow();
 

@@ -46,6 +46,7 @@
       }
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     html, body { height: 100%; }
     body {
       margin: 0; background: var(--bg); color: var(--text);
@@ -201,6 +202,32 @@
     .hit .snippet { font-size: 12.5px; white-space: pre-wrap; word-break: break-all; margin-top: 4px; }
     mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
 
+    /* Project dialog */
+    dialog {
+      border: 1px solid var(--border); border-radius: 14px; padding: 0; width: min(520px, calc(100vw - 32px));
+      background: var(--panel); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,.45);
+    }
+    dialog::backdrop { background: rgba(5,8,15,.55); backdrop-filter: blur(2px); }
+    .dlg { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+    .dlg h2 { margin: 0; font-size: 16px; }
+    .dlg p { margin: 0; color: var(--muted); font-size: 13px; }
+    .dlg label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+    .dlg input { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); }
+    .dlg input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(109,140,255,.18); }
+    .dlg .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+    .dlg .error { color: #ff7b7b; font-size: 13px; min-height: 0; }
+    .primary { padding: 7px 14px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; cursor: pointer; font-weight: 550; }
+    .primary:hover { filter: brightness(1.08); }
+    .primary.danger { background: #d9534f; }
+    .primary:disabled { opacity: .6; cursor: default; }
+    .secret {
+      display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px;
+      background: var(--code-bg); border: 1px solid var(--border);
+    }
+    .secret code { flex: 1; overflow-wrap: anywhere; font-size: 12.5px; }
+    .dlg pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; background: none; border: 0; padding: 0; flex: 1; }
+    .notice { font-size: 12.5px; color: var(--warn); background: rgba(240,163,94,.1); border-radius: 8px; padding: 8px 10px; }
+
     @media (max-width: 760px) {
       header { flex-wrap: wrap; }
       .search { order: 3; flex-basis: 100%; max-width: none; }
@@ -219,6 +246,14 @@
     <div class="select-wrap">
       <select id="project" title="Project"></select>
     </div>
+    <button class="icon-btn" id="new-project" title="Create a project and its ingest token">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+      <span class="hide-sm">New project</span>
+    </button>
+    <button class="icon-btn" id="token-btn" title="Generate a new ingest token for this project" hidden>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2.5 2.5"/></svg>
+      <span class="hide-sm">Token</span>
+    </button>
     <label class="search">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="q" placeholder="Search transcripts…" autocomplete="off" />
@@ -241,6 +276,7 @@
     </aside>
     <section id="content"></section>
   </main>
+  <dialog id="dlg"></dialog>
 
   <script>
     // In Electron, preload.js exposes window.api; in a browser (server.js),
@@ -252,9 +288,19 @@
       return res.json();
     };
     const projParam = (project) => (project === null ? '' : 'project=' + encodeURIComponent(project));
+    const postJson = async (p, body) => {
+      const res = await fetch(p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      let data = {};
+      try { data = await res.json(); } catch (_) { /* no body */ }
+      if (!res.ok) return { error: data.error || `HTTP ${res.status}` };
+      return data;
+    };
+    // createProject / rotateToken answer { name, token, createdAt } or { error }.
     const api = window.api || {
       config: async () => null,
       projects: () => getJson('projects'),
+      createProject: (name) => postJson('projects', { name }),
+      rotateToken: (name) => postJson('projects/token', { name }),
       sessions: (project) => getJson('sessions?' + projParam(project)),
       session: (project, id) => getJson(`session?${projParam(project)}&id=${encodeURIComponent(id)}`),
       search: (query, project) => getJson(`search?q=${encodeURIComponent(query)}&${projParam(project)}`),
@@ -382,17 +428,123 @@
     const mdNode = (text) => { const d = el('div', { className: 'md' }); d.innerHTML = markdown(text); return d; };
 
     // ---------- projects ----------
-    async function loadProjects() {
-      let projects = [];
-      try { projects = await api.projects(); } catch (_) { /* keep empty */ }
+    let projectsInfo = [];
+    async function loadProjects(select) {
+      try { projectsInfo = await api.projects(); } catch (_) { /* keep previous */ }
       const saved = store.get('scry.project');
-      const prev = projectSel.value || saved || ALL;
+      const prev = select || projectSel.value || saved || ALL;
       projectSel.innerHTML = '';
       projectSel.append(el('option', { value: ALL }, 'All projects'));
-      for (const p of projects) {
-        projectSel.append(el('option', { value: p === '' ? NONE : p }, p === '' ? '(no project)' : p));
+      for (const p of projectsInfo) {
+        const label = p.name === '' ? '(no project)' : p.name + (p.hasToken ? '' : ' (no token)');
+        projectSel.append(el('option', { value: p.name === '' ? NONE : p.name }, label));
       }
       projectSel.value = [...projectSel.options].some((o) => o.value === prev) ? prev : ALL;
+      updateTokenButton();
+    }
+    function updateTokenButton() {
+      const p = selectedProject();
+      $('token-btn').hidden = !p;
+    }
+
+    // ---------- project dialog ----------
+    const dlg = $('dlg');
+    let ingestUrl = new URL('ingest', location.href).href;
+    api.config().then((cfg) => { if (cfg) ingestUrl = `http://${cfg.HOST}:${cfg.PORT}/ingest`; }).catch(() => {});
+
+    async function copyButton(text, label = 'Copy') {
+      const b = el('button', {
+        className: 'icon-btn', type: 'button',
+        onclick: async () => {
+          try { await navigator.clipboard.writeText(text); b.textContent = 'Copied'; } catch (_) { b.textContent = 'Copy failed'; }
+          setTimeout(() => { b.textContent = label; }, 1400);
+        },
+      }, label);
+      return b;
+    }
+
+    function openDialog(...children) {
+      dlg.innerHTML = '';
+      dlg.append(el('div', { className: 'dlg' }, ...children));
+      if (!dlg.open) dlg.showModal();
+    }
+
+    async function showToken({ name, token }, fresh) {
+      const env = `SCRY_PROJECT=${name}\nSCRY_INGEST_URL=${ingestUrl}\nSCRY_INGEST_TOKEN=${token}`;
+      openDialog(
+        el('h2', {}, fresh ? `Project “${name}” created` : `New token for “${name}”`),
+        el('div', { className: 'notice' }, 'Copy this token now. scry stores only a hash of it and cannot show it again.'),
+        el('div', { className: 'secret' }, el('code', { className: 'mono' }, token), await copyButton(token)),
+        el('p', {}, 'Set these in the Claude environment that should log to this project (store the token as a secret):'),
+        el('div', { className: 'secret' }, el('pre', { className: 'mono' }, env), await copyButton(env, 'Copy all')),
+        fresh ? null : el('p', {}, 'Any previous token for this project no longer works.'),
+        el('div', { className: 'actions' }, el('button', { className: 'primary', type: 'button', onclick: () => dlg.close() }, 'Done')),
+      );
+    }
+
+    function newProjectDialog() {
+      const input = el('input', { placeholder: 'e.g. work', autocomplete: 'off', maxLength: 128 });
+      const err = el('div', { className: 'error' });
+      const submit = el('button', { className: 'primary', type: 'submit' }, 'Create project');
+      const form = el('form', {
+        className: 'dlg',
+        onsubmit: async (e) => {
+          e.preventDefault();
+          err.textContent = '';
+          const name = input.value.trim();
+          if (!name) { err.textContent = 'Enter a name.'; return; }
+          submit.disabled = true;
+          const r = await api.createProject(name).catch((e2) => ({ error: e2.message }));
+          submit.disabled = false;
+          if (r.error) { err.textContent = r.error; return; }
+          store.set('scry.project', r.name);
+          await loadProjects(r.name);
+          await loadSessions();
+          route();
+          showToken(r, true);
+        },
+      },
+        el('h2', {}, 'New project'),
+        el('p', {}, 'A project holds one Claude account’s sessions. It gets its own ingest token: senders can only write to the project their token belongs to.'),
+        el('label', {}, 'Name', input),
+        err,
+        el('div', { className: 'actions' },
+          el('button', { className: 'icon-btn', type: 'button', onclick: () => dlg.close() }, 'Cancel'),
+          submit),
+      );
+      dlg.innerHTML = '';
+      dlg.append(form);
+      dlg.showModal();
+      input.focus();
+    }
+
+    function tokenDialog() {
+      const name = selectedProject();
+      if (!name) return;
+      const info = projectsInfo.find((p) => p.name === name);
+      const has = info && info.hasToken;
+      const err = el('div', { className: 'error' });
+      const go = el('button', {
+        className: 'primary' + (has ? ' danger' : ''), type: 'button',
+        onclick: async () => {
+          go.disabled = true;
+          const r = await api.rotateToken(name).catch((e2) => ({ error: e2.message }));
+          go.disabled = false;
+          if (r.error) { err.textContent = r.error; return; }
+          await loadProjects(name);
+          showToken(r, false);
+        },
+      }, has ? 'Replace token' : 'Generate token');
+      openDialog(
+        el('h2', {}, `Ingest token for “${name}”`),
+        el('p', {}, has
+          ? `This project has a token${info.tokenCreatedAt ? `, created ${fmtFull(info.tokenCreatedAt)}` : ''}. scry cannot show it again; generating a new one stops the current token from working.`
+          : 'This project has no token yet, so nothing can be sent to it. Generate one to start ingesting.'),
+        err,
+        el('div', { className: 'actions' },
+          el('button', { className: 'icon-btn', type: 'button', onclick: () => dlg.close() }, 'Cancel'),
+          go),
+      );
     }
 
     // ---------- session list ----------
@@ -687,8 +839,11 @@
       if (e.key === 'Escape') { qInput.value = ''; qInput.blur(); }
     });
     filterInput.addEventListener('input', renderList);
+    $('new-project').addEventListener('click', newProjectDialog);
+    $('token-btn').addEventListener('click', tokenDialog);
     projectSel.addEventListener('change', async () => {
       store.set('scry.project', projectSel.value);
+      updateTokenButton();
       await loadSessions();
       const h = new URLSearchParams(location.hash.slice(1));
       if (h.has('q')) showSearch(h.get('q'));

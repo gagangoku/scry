@@ -13,7 +13,8 @@ npm start
 
 ## Ingest
 
-POST JSONL lines to `http://127.0.0.1:9999/ingest`. Every line needs a
+POST JSONL lines to `http://127.0.0.1:9999/ingest` with a project's token
+(see [Projects and tokens](#projects-and-tokens)). Every line needs a
 **project**: the `X-Project` header, else a `project` field in the line. A
 request where any line has no project is rejected with `400` and nothing is
 written. Projects keep different Claude accounts' sessions apart (e.g. `work`,
@@ -22,18 +23,25 @@ written. Projects keep different Claude accounts' sessions apart (e.g. `work`,
 `~/.jsonl-sessions/<project>/<sessionId>.jsonl`.
 
 ```bash
-curl -X POST -H 'X-Project: work' -H 'X-Session-Id: my-session' \
+curl -X POST -H "Authorization: Bearer $SCRY_INGEST_TOKEN" \
+  -H 'X-Project: work' -H 'X-Session-Id: my-session' \
   --data-binary $'{"msg":"hello"}\n{"msg":"world"}' \
   http://127.0.0.1:9999/ingest
 ```
 
-### Auth
+### Projects and tokens
 
-Start the app with `SCRY_INGEST_TOKEN` set and `/ingest` requires
-`Authorization: Bearer <token>`; requests without it get a 401. Unset, the
-endpoint is open — fine on localhost, required when exposing it on a real
-hostname. Senders (e.g. the claude-chat-logger plugin) read the same
-`SCRY_INGEST_TOKEN` variable.
+Ingest tokens belong to projects, not to the deployment. In the app, **New
+project** creates a project and shows its token once; **Token** (with a project
+selected) replaces it, retiring the old one, or issues the first token for a
+project folder from before tokens existed. `/ingest` needs
+`Authorization: Bearer <token>` (401 otherwise), and a token only writes to its
+own project (403 for lines naming another). Tokens are stored as SHA-256 hashes
+in `<dataDir>/.scry/projects.json`; scry cannot show a token again.
+
+Give each Claude account its own project and set `SCRY_PROJECT` and
+`SCRY_INGEST_TOKEN` in that account's environment; the claude-chat-logger
+plugin reads both.
 
 ## Plugin
 
@@ -78,9 +86,11 @@ Port, data directory, and search directories are set in `CONFIG` at the top of
 Electron, plus the search UI in a browser at `/` and its JSON API at
 `GET /search?q=`. It is configured by environment: `PORT` (9999), `HOST`
 (0.0.0.0), `SCRY_DATA_DIR` (`~/.jsonl-sessions`), `SCRY_SEARCH_DIRS` (extra
-`:`-separated dirs), `SCRY_INGEST_TOKEN`, and `SCRY_USER`/`SCRY_PASS` (basic
-auth for `/`, `/search`, `/projects`, `/sessions` and `/session`). The JSON
-API: `GET /search?q=[&project=]`, `GET /projects`, `GET /sessions[?project=]`,
+`:`-separated dirs), and `SCRY_USER`/`SCRY_PASS` (basic auth for `/`,
+`/search`, `/projects`, `/sessions` and `/session`, and for creating projects).
+The JSON API: `GET /search?q=[&project=]`, `GET /projects`,
+`POST /projects {"name"}` (answers the new token), `POST /projects/token
+{"name"}` (replaces it), `GET /sessions[?project=]`,
 `GET /session?project=&id=` — `project` absent means all projects, present and
 empty means the legacy files with no project. `GET /healthz` and `GET /plugin` are always open.
 

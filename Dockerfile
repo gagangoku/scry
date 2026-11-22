@@ -5,7 +5,8 @@
 #
 # docker build -t scry .
 # docker run -p 9999:9999 -v scry-data:/data \
-#   -e SCRY_INGEST_TOKEN=... -e SCRY_USER=... -e SCRY_PASS=... scry
+#   -e SCRY_USER=... -e SCRY_PASS=... scry
+# Ingest tokens are per project, created in the UI and stored in /data.
 FROM node:22-alpine
 WORKDIR /app
 COPY package.json server.js index.html ./
