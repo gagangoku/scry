@@ -3,7 +3,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
-const { createIngestServer, searchJsonl } = require('../lib/core');
+const {
+  createIngestServer, searchJsonl, listProjects, listSessions, readSession,
+  createProject, rotateProjectToken, projectForToken, projectInfo,
+} = require('../lib/core');
 
 function post(port, body, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -30,25 +33,108 @@ function post(port, body, headers = {}) {
   const server = await createIngestServer({ dataDir, port: 0 });
   const port = server.address().port;
 
-  // Session id from header
-  let res = await post(port, '{"msg":"alpha one"}\n{"msg":"alpha two"}\n', { 'x-session-id': 's1' });
+  // No token, or an unknown one: 401, nothing written
+  let res = await post(port, '{"msg":"x"}\n', { 'x-session-id': 's0', 'x-project': 'work' });
+  assert.strictEqual(res.status, 401);
+  res = await post(port, '{"msg":"x"}\n', { 'x-session-id': 's0', 'x-project': 'work', authorization: 'Bearer nope' });
+  assert.strictEqual(res.status, 401);
+  assert.deepStrictEqual(fs.readdirSync(dataDir), []);
+
+  // Projects and their tokens
+  const work = createProject(dataDir, 'work');
+  const personal = createProject(dataDir, 'personal');
+  assert.match(work.token, /^scry_/);
+  assert.notStrictEqual(work.token, personal.token);
+  assert.throws(() => createProject(dataDir, 'work'), (e) => e.status === 409);
+  assert.throws(() => createProject(dataDir, '../x'), (e) => e.status === 400);
+  assert.throws(() => createProject(dataDir, '.scry'), (e) => e.status === 400);
+  assert.throws(() => rotateProjectToken(dataDir, 'ghost'), (e) => e.status === 404);
+  assert.strictEqual(projectForToken(dataDir, work.token), 'work');
+  // Tokens are stored hashed, never in the clear
+  assert.ok(!fs.readFileSync(path.join(dataDir, '.scry', 'projects.json'), 'utf8').includes(work.token));
+  const W = { authorization: `Bearer ${work.token}` };
+  const P = { authorization: `Bearer ${personal.token}` };
+
+  // No project anywhere: rejected, nothing written
+  res = await post(port, '{"msg":"orphan"}\n', { 'x-session-id': 's0', ...W });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.error, /project/);
+  // One line without a project rejects the whole request
+  res = await post(port, '{"project":"work","msg":"ok"}\n{"msg":"orphan"}\n', { 'x-session-id': 's0', ...W });
+  assert.strictEqual(res.status, 400);
+  // A token only writes to its own project
+  res = await post(port, '{"msg":"x"}\n', { 'x-session-id': 's0', 'x-project': 'personal', ...W });
+  assert.strictEqual(res.status, 403);
+  assert.deepStrictEqual(fs.readdirSync(path.join(dataDir, 'work')), []);
+  assert.deepStrictEqual(fs.readdirSync(path.join(dataDir, 'personal')), []);
+
+  // Session id and project from headers
+  res = await post(port, '{"ts":"2026-01-02T03:04:05Z","kind":"prompt","prompt":"alpha one"}\n{"kind":"response","response":"alpha two"}\n',
+    { 'x-session-id': 's1', 'x-project': 'work', ...W });
   assert.strictEqual(res.appended, 2);
 
-  // Session id from the line itself
-  res = await post(port, '{"sessionId":"s2","msg":"beta"}\n');
+  // Session id and project from the line itself
+  res = await post(port, '{"sessionId":"s2","project":"personal","msg":"beta"}\n', P);
   assert.strictEqual(res.appended, 1);
 
   // Appending again to the same session
-  res = await post(port, '{"msg":"alpha three"}\n', { 'x-session-id': 's1' });
+  res = await post(port, '{"msg":"alpha three"}\n', { 'x-session-id': 's1', 'x-project': 'work', ...W });
   assert.strictEqual(res.appended, 1);
 
-  const s1 = fs.readFileSync(path.join(dataDir, 's1.jsonl'), 'utf8');
+  // Traversal in the project header cannot escape the token's project
+  res = await post(port, '{"msg":"gamma"}\n', { 'x-session-id': 's1', 'x-project': '../personal', ...P });
+  assert.strictEqual(res.status, 403);
+
+  // Rotating a token retires the old one
+  const work2 = rotateProjectToken(dataDir, 'work');
+  res = await post(port, '{"msg":"x"}\n', { 'x-session-id': 's1', 'x-project': 'work', ...W });
+  assert.strictEqual(res.status, 401);
+  W.authorization = `Bearer ${work2.token}`;
+
+  const s1 = fs.readFileSync(path.join(dataDir, 'work', 's1.jsonl'), 'utf8');
   assert.strictEqual(s1.trim().split('\n').length, 3);
-  assert.ok(fs.existsSync(path.join(dataDir, 's2.jsonl')));
+  assert.ok(fs.existsSync(path.join(dataDir, 'personal', 's2.jsonl')));
+  assert.ok(!fs.existsSync(path.join(dataDir, '__personal')));
+
+  // A legacy file with no project, from before projects existed
+  fs.writeFileSync(path.join(dataDir, 'legacy.jsonl'), '{"msg":"old alpha"}\n');
+
+  // Projects and sessions
+  assert.deepStrictEqual(listProjects(dataDir), ['personal', 'work', '']);
+  // A folder from before tokens existed shows up without a token until one is issued
+  fs.mkdirSync(path.join(dataDir, 'old'));
+  assert.deepStrictEqual(projectInfo(dataDir).map((p) => [p.name, p.hasToken]),
+    [['old', false], ['personal', true], ['work', true], ['', false]]);
+  const old = rotateProjectToken(dataDir, 'old');
+  assert.strictEqual(projectForToken(dataDir, old.token), 'old');
+  fs.rmSync(path.join(dataDir, 'old'), { recursive: true });
+  const reg = JSON.parse(fs.readFileSync(path.join(dataDir, '.scry', 'projects.json'), 'utf8'));
+  delete reg.projects.old;
+  fs.writeFileSync(path.join(dataDir, '.scry', 'projects.json'), JSON.stringify(reg));
+  let list = listSessions({ dataDir });
+  assert.strictEqual(list.length, 3);
+  list = listSessions({ dataDir, project: 'work' });
+  assert.strictEqual(list.length, 1);
+  assert.strictEqual(list[0].id, 's1');
+  assert.strictEqual(list[0].title, 'alpha one');
+  assert.strictEqual(list[0].createdAt, '2026-01-02T03:04:05.000Z');
+  assert.ok(list[0].updatedAt);
+  assert.strictEqual(listSessions({ dataDir, project: '' })[0].id, 'legacy');
+  const sess = await readSession({ dataDir, project: 'work', id: 's1' });
+  assert.strictEqual(sess.lines.length, 3);
+  assert.strictEqual(sess.lines[1].data.response, 'alpha two');
+  assert.strictEqual(await readSession({ dataDir, project: 'work', id: 'nope' }), null);
 
   // Search across both the ingest dir and the claude projects dir
-  let hits = await searchJsonl({ dirs: [dataDir, path.join(tmp, 'claude-projects')], query: 'alpha' });
+  let hits = await searchJsonl({ dirs: [dataDir, path.join(tmp, 'claude-projects')], query: 'alpha', dataDir });
+  assert.strictEqual(hits.length, 4);
+  const workHit = hits.find((h) => h.project === 'work');
+  assert.strictEqual(workHit.session, 's1');
+  hits = await searchJsonl({ dirs: [path.join(dataDir, 'work')], query: 'alpha' });
   assert.strictEqual(hits.length, 3);
+  hits = await searchJsonl({ dirs: [dataDir], query: 'alpha', recursive: false, dataDir });
+  assert.strictEqual(hits.length, 1);
+  assert.strictEqual(hits[0].project, '');
 
   hits = await searchJsonl({ dirs: [dataDir, path.join(tmp, 'claude-projects')], query: 'claude projects' });
   assert.strictEqual(hits.length, 1);
@@ -80,24 +166,6 @@ function post(port, body, headers = {}) {
   );
   pluginServer.close();
 
-  // Bearer token auth
-  const authDir = path.join(tmp, 'auth-sessions');
-  const authServer = await createIngestServer({ dataDir: authDir, port: 0, token: 'sekret' });
-  const authPort = authServer.address().port;
-
-  res = await post(authPort, '{"msg":"locked"}\n', { 'x-session-id': 's3' });
-  assert.strictEqual(res.status, 401);
-
-  res = await post(authPort, '{"msg":"locked"}\n', { 'x-session-id': 's3', authorization: 'Bearer wrong' });
-  assert.strictEqual(res.status, 401);
-  assert.ok(!fs.existsSync(path.join(authDir, 's3.jsonl')));
-
-  res = await post(authPort, '{"msg":"unlocked"}\n', { 'x-session-id': 's3', authorization: 'Bearer sekret' });
-  assert.strictEqual(res.status, 200);
-  assert.strictEqual(res.appended, 1);
-  assert.ok(fs.existsSync(path.join(authDir, 's3.jsonl')));
-
-  authServer.close();
 
   // Web UI, /search, /healthz and basic auth
   const uiFile = path.join(tmp, 'ui.html');
@@ -125,7 +193,47 @@ function post(port, body, headers = {}) {
   assert.strictEqual(r.data, '<p>scry ui</p>');
   r = await get('/search?q=alpha', basic('u', 'p'));
   assert.strictEqual(r.status, 200);
+  assert.strictEqual(JSON.parse(r.data).length, 4);
+  r = await get('/search?q=alpha&project=work', basic('u', 'p'));
   assert.strictEqual(JSON.parse(r.data).length, 3);
+  r = await get('/search?q=alpha&project=', basic('u', 'p'));
+  assert.strictEqual(JSON.parse(r.data).length, 1);
+  assert.strictEqual((await get('/projects')).status, 401);
+  r = await get('/projects', basic('u', 'p'));
+  assert.deepStrictEqual(JSON.parse(r.data).map((x) => x.name), ['personal', 'work', '']);
+  // Creating a project and rotating its token over HTTP
+  const send = (p, body, headers = {}) => new Promise((resolve, reject) => {
+    const q = http.request({ host: '127.0.0.1', port: uiPort, path: p, method: 'POST', headers }, (rr) => {
+      let data = '';
+      rr.on('data', (c) => (data += c));
+      rr.on('end', () => resolve({ status: rr.statusCode, data }));
+    });
+    q.on('error', reject);
+    q.end(body);
+  });
+  const json = { 'content-type': 'application/json' };
+  assert.strictEqual((await send('/projects', '{"name":"team"}', json)).status, 401);
+  assert.strictEqual((await send('/projects', 'name=team', { ...basic('u', 'p'), 'content-type': 'application/x-www-form-urlencoded' })).status, 415);
+  r = await send('/projects', '{"name":"team"}', { ...basic('u', 'p'), ...json });
+  assert.strictEqual(r.status, 201);
+  const team = JSON.parse(r.data);
+  assert.strictEqual(team.name, 'team');
+  assert.strictEqual(projectForToken(dataDir, team.token), 'team');
+  assert.strictEqual((await send('/projects', '{"name":"team"}', { ...basic('u', 'p'), ...json })).status, 409);
+  r = await send('/projects/token', '{"name":"team"}', { ...basic('u', 'p'), ...json });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(projectForToken(dataDir, team.token), null);
+  assert.strictEqual(projectForToken(dataDir, JSON.parse(r.data).token), 'team');
+  assert.strictEqual((await send('/projects/token', '{"name":"ghost"}', { ...basic('u', 'p'), ...json })).status, 404);
+  r = await get('/sessions', basic('u', 'p'));
+  assert.strictEqual(JSON.parse(r.data).length, 3);
+  r = await get('/sessions?project=personal', basic('u', 'p'));
+  assert.deepStrictEqual(JSON.parse(r.data).map((x) => x.id), ['s2']);
+  r = await get('/session?project=work&id=s1', basic('u', 'p'));
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(JSON.parse(r.data).lines.length, 3);
+  assert.strictEqual((await get('/session?project=work&id=missing', basic('u', 'p'))).status, 404);
+  assert.strictEqual((await get('/session?project=..&id=s1', basic('u', 'p'))).status, 404);
   uiServer.close();
 
   server.close();
