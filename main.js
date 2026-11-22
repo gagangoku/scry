@@ -19,9 +19,9 @@ const CONFIG = {
 
 // The window is a browser on the app's own server, so the desktop app and the
 // headless server (server.js) run the same UI and the same API: everything in
-// one is in the other, and http://127.0.0.1:9999/ works in any browser while
+// one is in the other, and http://127.0.0.1:9999/app works in any browser while
 // the app runs. The server listens on localhost only, without basic auth.
-const UI_URL = `http://${CONFIG.HOST}:${CONFIG.PORT}/`;
+const UI_URL = `http://${CONFIG.HOST}:${CONFIG.PORT}/app`;
 
 function createWindow() {
   const win = new BrowserWindow({ width: 1200, height: 800 });
@@ -35,7 +35,8 @@ app.whenReady().then(async () => {
       port: CONFIG.PORT,
       host: CONFIG.HOST,
       pluginDir: CONFIG.PLUGIN_DIR,
-      uiFile: path.join(__dirname, 'index.html'),
+      uiFile: path.join(__dirname, 'public', 'app.html'),
+      publicDir: path.join(__dirname, 'public'),
       searchDirs: CONFIG.SEARCH_DIRS,
       maxResults: CONFIG.MAX_RESULTS,
     });
