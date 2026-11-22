@@ -161,6 +161,12 @@
     .bubble { padding: 10px 14px; border-radius: 16px; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
     .msg.user .bubble { background: var(--user-bubble); color: var(--user-text); border-bottom-right-radius: 5px; white-space: pre-wrap; box-shadow: var(--shadow); }
     .msg.agent .bubble { background: var(--agent-bubble); border: 1px solid var(--border); border-bottom-left-radius: 5px; box-shadow: var(--shadow); }
+    .media { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: flex-start; max-width: 100%; }
+    .media img {
+      display: block; max-width: min(100%, 420px); max-height: 320px; border-radius: 12px;
+      border: 1px solid var(--border); background: var(--panel-2); cursor: zoom-in; box-shadow: var(--shadow);
+    }
+    .media .chip { font-size: 12px; }
     .meta { font-size: 11px; color: var(--faint); padding: 0 6px; display: flex; gap: 6px; align-items: center; }
     .msg.highlight { background: var(--mark); }
     details.thinking, details.tool, details.event {
@@ -637,11 +643,42 @@
     const detailsBlock = (cls, label, bodyNode) =>
       el('details', { className: cls }, el('summary', {}, label), bodyNode);
 
-    function userMsg(text, ts, line) {
+    // Images and documents of a user prompt, normalized from the chat-logger's
+    // attachments ({type, mediaType, filename, data}) and from transcript content
+    // blocks ({type: 'image'|'document', source: {type: 'base64', media_type, data}}).
+    function mediaOf(items) {
+      const out = [];
+      for (const b of items || []) {
+        if (!b || (b.type !== 'image' && b.type !== 'document')) continue;
+        const src = b.source || {};
+        const mediaType = b.mediaType || src.media_type || '';
+        const data = typeof b.data === 'string' ? b.data : (src.type === 'base64' && typeof src.data === 'string' ? src.data : '');
+        const url = data ? `data:${mediaType || 'application/octet-stream'};base64,${data}` : (src.type === 'url' ? src.url : '');
+        out.push({ type: b.type, mediaType, filename: b.filename || b.title || '', url, note: b.note || '' });
+      }
+      return out;
+    }
+    function mediaNode(media) {
+      if (!media.length) return null;
+      return el('div', { className: 'media' }, media.map((m) => {
+        const label = m.filename || m.mediaType || m.type;
+        if (m.type === 'image' && m.url) {
+          return el('a', { href: m.url, target: '_blank', rel: 'noopener noreferrer', title: label },
+            el('img', { src: m.url, alt: label, loading: 'lazy' }));
+        }
+        const text = `${m.type === 'image' ? '🖼' : '📄'} ${label}${m.url ? '' : ' (not saved)'}`;
+        return m.url
+          ? el('a', { className: 'chip', href: m.url, download: m.filename || '', title: label }, text)
+          : el('span', { className: 'chip', title: m.note || 'The bytes were not logged' }, text);
+      }));
+    }
+
+    function userMsg(text, ts, line, media = []) {
       return el('div', { className: 'msg user', dataset: { line } },
         el('div', { className: 'avatar' }, 'You'),
         el('div', { className: 'stack' },
-          el('div', { className: 'bubble' }, text),
+          mediaNode(media),
+          text || !media.length ? el('div', { className: 'bubble' }, text) : null,
           ts ? el('div', { className: 'meta', title: fmtFull(ts) }, fmtTime(ts)) : null,
         ));
     }
@@ -659,8 +696,15 @@
     const thinkingBlock = (t) => detailsBlock('thinking', 'Thinking', el('div', { className: 'body' }, t));
     const toolUseBlock = (b) => detailsBlock('tool', ['🔧 ', el('span', { className: 'mono' }, b.name || 'tool')],
       el('pre', {}, stringify(b.input)));
-    const toolResultBlock = (b) => detailsBlock('tool', ['↩ ', b.is_error ? 'Tool error' : 'Tool result'],
-      el('pre', {}, typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((c) => c.text || stringify(c)).join('\n') : stringify(b.content)));
+    const toolResultBlock = (b) => {
+      const items = Array.isArray(b.content) ? b.content : null;
+      const media = mediaOf(items);
+      const text = typeof b.content === 'string' ? b.content
+        : items ? items.filter((c) => c && c.type !== 'image' && c.type !== 'document').map((c) => c.text || stringify(c)).join('\n')
+        : stringify(b.content);
+      return detailsBlock('tool', ['↩ ', b.is_error ? 'Tool error' : 'Tool result', media.length ? ` · ${media.length} image${media.length > 1 ? 's' : ''}` : ''],
+        el('div', {}, text ? el('pre', {}, text) : null, mediaNode(media)));
+    };
 
     // One rendered row (or null) per stored line. Understands the chat-logger
     // format ({kind: prompt|response}) and raw Claude Code transcript lines
@@ -671,7 +715,7 @@
           detailsBlock('event', `Unparsed line ${line}`, el('pre', {}, raw)));
       }
       const ts = data.ts || data.timestamp || null;
-      if (data.kind === 'prompt') return userMsg(data.prompt || '', ts, line);
+      if (data.kind === 'prompt') return userMsg(data.prompt || '', ts, line, mediaOf(data.attachments));
       if (data.kind === 'response') {
         const parts = [];
         if (data.thinking) parts.push(thinkingBlock(data.thinking));
@@ -686,7 +730,8 @@
         if (data.type === 'user') {
           const text = textOf(blocks);
           const tools = blocks.filter((b) => b && b.type === 'tool_result');
-          if (text && !tools.length) return userMsg(text, ts, line);
+          const media = mediaOf(blocks);
+          if ((text || media.length) && !tools.length) return userMsg(text, ts, line, media);
           if (tools.length) return agentMsg(tools.map(toolResultBlock), ts, line);
           return null;
         }

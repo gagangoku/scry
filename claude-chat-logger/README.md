@@ -5,7 +5,7 @@ A Claude Code plugin that saves every user prompt and agent response to a JSONL 
 ## What it does
 
 - Logs two kinds of JSON lines:
-  - `{kind: "prompt", ts, session_id, project?, remote_session_id?, prompt}` the moment a prompt is submitted, so a long or interrupted turn never loses it.
+  - `{kind: "prompt", ts, session_id, project?, remote_session_id?, prompt, attachments?}` the moment a prompt is submitted, so a long or interrupted turn never loses it. `attachments` lists pasted images and documents as `{type, mediaType?, filename?, data?}`, `data` being the base64 bytes the model received; an item over 10 MB, or one the engine could not read, keeps only its kind and a `note`. scry shows the images in the session view.
   - `{kind: "response", ts, session_id, project?, remote_session_id?, turn_id, reason, response, thinking?}` when the turn ends — any reason, aborted and errored turns included (`reason` says which). `thinking` is the model's streamed thinking for that turn, captured via a pass-through `turn.step` hook. Subagent turns are skipped.
 - `remote_session_id` is the claude.ai/code session id (`session_01...`), resolved at session start from the `claude-code-remote` MCP server in cloud sessions; it is also the scry session key, so scry files map to claude.ai/code URLs. Outside cloud sessions the local session UUID is used.
 - Appends each line to `~/.claude/chat-log.jsonl`.
