@@ -156,6 +156,31 @@ function post(port, body, headers = {}) {
   assert.strictEqual(hits.length, 1);
   assert.ok(hits[0].file.endsWith('old.jsonl'));
 
+  // A local project over Claude Code's own transcripts (~/.claude/projects)
+  const localRoot = path.join(tmp, 'local-claude');
+  const localProjects = { 'claude-code-local': localRoot };
+  fs.mkdirSync(path.join(localRoot, '-home-me-repo', 'abc', 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(localRoot, '-home-me-repo', 'abc.jsonl'),
+    '{"type":"summary"}\n{"type":"user","timestamp":"2026-03-04T05:06:07Z","message":{"role":"user","content":"local delta"}}\n');
+  fs.writeFileSync(path.join(localRoot, '-home-me-repo', 'abc', 'subagents', 'agent-1.jsonl'), '{"msg":"delta sub"}\n');
+  assert.deepStrictEqual(projectInfo(dataDir, localProjects).map((p) => [p.name, p.local]),
+    [['personal', false], ['work', false], ['', false], ['claude-code-local', true]]);
+  list = listSessions({ dataDir, project: 'claude-code-local', localProjects });
+  assert.deepStrictEqual(list.map((s) => [s.project, s.id, s.title]), [['claude-code-local', 'abc', 'local delta']]);
+  assert.strictEqual(list[0].createdAt, '2026-03-04T05:06:07.000Z');
+  assert.strictEqual(listSessions({ dataDir, localProjects }).length, 4);
+  assert.strictEqual(listSessions({ dataDir }).length, 3);
+  const localSess = await readSession({ dataDir, project: 'claude-code-local', id: 'abc', localProjects });
+  assert.strictEqual(localSess.lines.length, 2);
+  assert.strictEqual(await readSession({ dataDir, project: 'claude-code-local', id: 'agent-1', localProjects }), null);
+  hits = await searchJsonl({ dirs: [localRoot], query: 'delta', dataDir, localProjects });
+  assert.strictEqual(hits.length, 2);
+  const localHit = hits.find((h) => h.session === 'abc');
+  assert.strictEqual(localHit.project, 'claude-code-local');
+  assert.strictEqual(hits.find((h) => h !== localHit).session, undefined);
+  assert.throws(() => createProject(dataDir, 'claude-code-local', localProjects), (e) => e.status === 409);
+  assert.throws(() => rotateProjectToken(dataDir, 'claude-code-local', localProjects), (e) => e.status === 400);
+
   // GET /plugin answers a tar.gz of pluginDir
   const pluginDir = path.join(tmp, 'fake-plugin');
   fs.mkdirSync(pluginDir, { recursive: true });
@@ -192,7 +217,7 @@ function post(port, body, headers = {}) {
   fs.mkdirSync(publicDir);
   fs.writeFileSync(path.join(publicDir, 'favicon.svg'), '<svg/>');
   const uiServer = await createIngestServer({
-    dataDir, port: 0, uiFile, landingFile, publicDir, searchDirs: [dataDir], uiUser: 'u', uiPass: 'p',
+    dataDir, port: 0, uiFile, landingFile, publicDir, searchDirs: [dataDir], uiUser: 'u', uiPass: 'p', localProjects,
   });
   const uiPort = uiServer.address().port;
   const get = (p, headers = {}) => new Promise((resolve, reject) => {
@@ -230,7 +255,15 @@ function post(port, body, headers = {}) {
   assert.strictEqual(JSON.parse(r.data).length, 1);
   assert.strictEqual((await get('/projects')).status, 401);
   r = await get('/projects', basic('u', 'p'));
-  assert.deepStrictEqual(JSON.parse(r.data).map((x) => x.name), ['personal', 'work', '']);
+  assert.deepStrictEqual(JSON.parse(r.data).map((x) => x.name), ['personal', 'work', '', 'claude-code-local']);
+  r = await get('/sessions?project=claude-code-local', basic('u', 'p'));
+  assert.deepStrictEqual(JSON.parse(r.data).map((x) => x.id), ['abc']);
+  r = await get('/session?project=claude-code-local&id=abc', basic('u', 'p'));
+  assert.strictEqual(JSON.parse(r.data).lines.length, 2);
+  r = await get('/search?q=delta&project=claude-code-local', basic('u', 'p'));
+  assert.strictEqual(JSON.parse(r.data).filter((h) => h.session === 'abc').length, 1);
+  r = await get('/search?q=delta', basic('u', 'p'));
+  assert.strictEqual(JSON.parse(r.data).length, 2);
   // Creating a project and rotating its token over HTTP
   const send = (p, body, headers = {}) => new Promise((resolve, reject) => {
     const q = http.request({ host: '127.0.0.1', port: uiPort, path: p, method: 'POST', headers }, (rr) => {
@@ -256,7 +289,7 @@ function post(port, body, headers = {}) {
   assert.strictEqual(projectForToken(dataDir, JSON.parse(r.data).token), 'team');
   assert.strictEqual((await send('/projects/token', '{"name":"ghost"}', { ...basic('u', 'p'), ...json })).status, 404);
   r = await get('/sessions', basic('u', 'p'));
-  assert.strictEqual(JSON.parse(r.data).length, 3);
+  assert.strictEqual(JSON.parse(r.data).length, 4);
   r = await get('/sessions?project=personal', basic('u', 'p'));
   assert.deepStrictEqual(JSON.parse(r.data).map((x) => x.id), ['s2']);
   r = await get('/session?project=work&id=s1', basic('u', 'p'));

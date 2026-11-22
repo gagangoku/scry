@@ -18,6 +18,35 @@ That server listens on localhost only, without basic auth. Only one of the app
 and `npm run serve` can hold port 9999 at a time; the app shows an error and
 quits if the port is taken.
 
+## macOS app
+
+The landing page's **Download for macOS** button links to
+[`Scry-mac.dmg`](https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac.dmg),
+a universal (Apple Silicon + Intel) build.
+[`.github/workflows/mac-app.yaml`](.github/workflows/mac-app.yaml) builds it on
+a macOS runner with `npm run dist:mac` (electron-builder) whenever the app's
+files change on `master`, or on demand from the Actions tab, and replaces the
+DMG on the `mac-latest` release.
+
+It does not install itself:
+
+1. Open the DMG and drag **Scry** into **Applications**.
+2. The app is ad-hoc signed but not notarized, so Gatekeeper blocks the first
+   launch. Open it once, click **Done**, then in **System Settings → Privacy &
+   Security** click **Open Anyway** next to Scry and confirm. Or clear the
+   quarantine flag and open it normally:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Scry.app
+   ```
+
+3. Point the plugin at `http://127.0.0.1:9999/ingest` with a project's token.
+
+Notarizing (so step 2 goes away) needs an Apple Developer ID certificate and
+electron-builder's `CSC_LINK`/`APPLE_ID` secrets in the workflow, in place of
+`mac.identity: "-"`. The app is packaged without asar because `/plugin` runs
+`tar` on `claude-chat-logger/`, which must be a real directory.
+
 ## Ingest
 
 POST JSONL lines to `http://127.0.0.1:9999/ingest` with a project's token
@@ -82,6 +111,11 @@ mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-session
 
 - **Project menu** in the header: one project, or **All projects**. It scopes
   both the session list and search.
+- **claude-code-local** (Electron app only): a read-only project over the
+  Claude Code transcripts in `~/.claude/projects/` on this machine. Its
+  sessions are `~/.claude/projects/<folder>/<id>.jsonl` (subagent transcripts
+  deeper down are searchable but not listed). It has no token, and nothing is
+  ingested into it.
 - **Sessions** sidebar: every session with its name (first prompt, else id),
   id, created time (first line's `ts`) and last-updated time, newest first,
   with a filter box. Refreshes every 20s.
@@ -97,11 +131,11 @@ mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-session
   and `/session` answer that link as `webUrl` (null otherwise). In the
   Electron app it opens in the default browser.
 - **Search** (`/` to focus): case-insensitive substring scan. With **All
-  projects** it covers every `.jsonl` under the search dirs (in the Electron
-  app, also `~/.claude/projects/`); with one project, only that project.
+  projects** it covers every `.jsonl` under the search dirs and local projects
+  (in the Electron app, `~/.claude/projects/`); with one project, only that project.
   Clicking a hit opens the session scrolled to that line.
 
-Port, data directory, and search directories are set in `CONFIG` at the top of
+Port, data directory, search directories and local projects are set in `CONFIG` at the top of
 `main.js`.
 
 ## Server (headless)
