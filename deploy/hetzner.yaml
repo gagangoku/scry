@@ -31,6 +31,10 @@ metadata:
   labels:
     app: scry
 spec:
+  # Hetzner Cloud CSI volume. Without this the claim falls back to the
+  # cluster's default StorageClass (often node-local), and no volume shows up
+  # in the Hetzner console. storageClassName can't be changed on an existing claim
+  storageClassName: hcloud-volumes
   accessModes: ["ReadWriteOnce"]
   resources:
     requests:
