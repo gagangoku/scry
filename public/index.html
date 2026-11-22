@@ -242,6 +242,18 @@
     .c-k { color: #b392ff; } .c-s { color: #7ad3a6; } .c-c { color: var(--faint); } .c-v { color: #ffb86b; }
     @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .c-k { color: #6a3fd9; } :root:not([data-theme="dark"]) .c-s { color: #1b8a5a; } :root:not([data-theme="dark"]) .c-v { color: #b25e00; } }
 
+    /* ---------- download ---------- */
+    .dl-note { margin-top: 14px; font-size: 13.5px; color: var(--faint); }
+    .install { list-style: none; padding: 0; margin: 0; display: grid; gap: 18px; counter-reset: inst; }
+    .install > li { display: grid; grid-template-columns: 28px 1fr; gap: 14px; color: var(--muted); font-size: 15px; min-width: 0; }
+    .install > li::before { counter-increment: inst; content: counter(inst); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px; }
+    .install > li > div, #download .wrap > * { min-width: 0; }
+    .install b { color: var(--text); font-weight: 600; }
+    .install code { overflow-wrap: anywhere; font-size: 13.5px; background: var(--panel-2); padding: 1px 6px; border-radius: 5px; }
+    .install .code { margin-top: 10px; }
+    #download .sec-lede { margin-top: 14px; }
+    #download .sec-lede code { font-size: .85em; background: var(--panel-2); padding: 1px 6px; border-radius: 5px; }
+
     /* ---------- self-host ---------- */
     .split { display: grid; grid-template-columns: 1.05fr 1fr; gap: 56px; align-items: center; }
     @media (max-width: 900px) { .split { grid-template-columns: 1fr; gap: 36px; } }
@@ -297,6 +309,7 @@
       <div class="nav-links">
         <a href="#features">Features</a>
         <a href="#how">How it works</a>
+        <a href="#download">Mac app</a>
         <a href="#self-host">Self-hosting</a>
         <a href="#faq">FAQ</a>
       </div>
@@ -315,6 +328,7 @@
         <a class="btn primary" href="/app">Open Scry
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </a>
+        <a class="btn" href="#download"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.19-1.73-1.36-.14-2.65.8-3.34.8-.69 0-1.75-.78-2.88-.76-1.48.02-2.85.86-3.61 2.19-1.54 2.67-.39 6.62 1.1 8.79.73 1.06 1.6 2.25 2.74 2.21 1.1-.04 1.52-.71 2.85-.71 1.33 0 1.7.71 2.87.69 1.18-.02 1.93-1.08 2.66-2.14.84-1.23 1.18-2.42 1.2-2.48-.03-.01-2.3-.88-2.32-3.5zM14.18 6.13c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.54 1.31-.56.64-1.05 1.67-.92 2.66.97.07 1.96-.49 2.56-1.21z"/></svg>Download for macOS</a>
         <a class="btn" href="#how">Set up in 3 steps</a>
       </div>
       <div class="hero-note">Self-hosted · One Docker image · Your transcripts stay on your servers</div>
@@ -470,6 +484,33 @@
       </div>
     </section>
 
+    <section id="download">
+      <div class="wrap split">
+        <div class="reveal">
+          <div class="eyebrow">Desktop app</div>
+          <h2>Scry for your Mac.</h2>
+          <p class="sec-lede">The desktop app runs the same server and UI on your own machine, at <code>http://127.0.0.1:9999</code>, and also searches the transcripts Claude Code already keeps in <code>~/.claude/projects</code>.</p>
+          <div class="cta-row" style="justify-content:flex-start;margin-top:28px">
+            <a class="btn primary" href="https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac-arm64.dmg" download><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.19-1.73-1.36-.14-2.65.8-3.34.8-.69 0-1.75-.78-2.88-.76-1.48.02-2.85.86-3.61 2.19-1.54 2.67-.39 6.62 1.1 8.79.73 1.06 1.6 2.25 2.74 2.21 1.1-.04 1.52-.71 2.85-.71 1.33 0 1.7.71 2.87.69 1.18-.02 1.93-1.08 2.66-2.14.84-1.23 1.18-2.42 1.2-2.48-.03-.01-2.3-.88-2.32-3.5zM14.18 6.13c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.54 1.31-.56.64-1.05 1.67-.92 2.66.97.07 1.96-.49 2.56-1.21z"/></svg>Download for Apple Silicon</a>
+            <a class="btn" href="https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac-x64.dmg" download><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.19-1.73-1.36-.14-2.65.8-3.34.8-.69 0-1.75-.78-2.88-.76-1.48.02-2.85.86-3.61 2.19-1.54 2.67-.39 6.62 1.1 8.79.73 1.06 1.6 2.25 2.74 2.21 1.1-.04 1.52-.71 2.85-.71 1.33 0 1.7.71 2.87.69 1.18-.02 1.93-1.08 2.66-2.14.84-1.23 1.18-2.42 1.2-2.48-.03-.01-2.3-.88-2.32-3.5zM14.18 6.13c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.54 1.31-.56.64-1.05 1.67-.92 2.66.97.07 1.96-.49 2.56-1.21z"/></svg>Intel Mac</a>
+          </div>
+          <div class="dl-note">Apple Silicon (M1 and later) or Intel · macOS 11 or later · Not sure? Apple menu → About This Mac → Chip</div>
+        </div>
+        <div class="arch reveal">
+          <ol class="install">
+            <li><div><b>Open the DMG</b> and drag <b>Scry</b> into <b>Applications</b>. It doesn't install itself.</div></li>
+            <li><div><b>Allow it once.</b> Scry isn't notarized by Apple yet, so the first launch is blocked. Open Scry, click <b>Done</b>, then go to <b>System Settings → Privacy &amp; Security</b>, click <b>Open Anyway</b> next to Scry and confirm. Or run this in Terminal, then open it normally:
+              <div class="code">
+                <div class="code-h"><span>Terminal</span><button class="copy" type="button" data-copy="unquarantine">Copy</button></div>
+                <pre id="unquarantine"><span class="c-k">xattr</span> -dr com.apple.quarantine /Applications/Scry.app</pre>
+              </div>
+            </div></li>
+            <li><div><b>Point the plugin at it.</b> Create a project in the app, then set <code>SCRY_INGEST_URL=http://127.0.0.1:9999/ingest</code> with that project's token, as in step 3 above.</div></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
     <section id="self-host">
       <div class="wrap split">
         <div class="reveal">
@@ -573,6 +614,7 @@
       <div class="foot-links">
         <a href="#features">Features</a>
         <a href="#how">Setup</a>
+        <a href="#download">Mac app</a>
         <a href="/healthz">Status</a>
         <a href="/app">App</a>
       </div>

@@ -1,13 +1,29 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, shell } = require('electron');
 const path = require('path');
 const os = require('os');
 const { createIngestServer } = require('./lib/core');
+const { loadBuildInfo } = require('./lib/build-info');
+
+const BUILD_INFO = {
+  ...loadBuildInfo(),
+  app: 'mac',
+  arch: process.arch,
+  electron: process.versions.electron,
+};
 
 // All configuration lives here.
 const CONFIG = {
   PORT: 9999,
   HOST: '127.0.0.1',
   DATA_DIR: path.join(os.homedir(), '.jsonl-sessions'),
+  // Read-only projects over local Claude Code transcripts: listed, opened and
+  // searched like ingested projects, but nothing is ingested into them. They
+  // are this machine's own plaintext files, not scry's encrypted store, so
+  // they need no token.
+  LOCAL_PROJECTS: {
+    'claude-code-local': path.join(os.homedir(), '.claude', 'projects'),
+  },
+  MAX_RESULTS: 200,
   // Served as a tar.gz at GET /plugin.
   PLUGIN_DIR: path.join(__dirname, 'claude-chat-logger'),
 };
@@ -20,10 +36,23 @@ const UI_URL = `http://${CONFIG.HOST}:${CONFIG.PORT}/app`;
 
 function createWindow() {
   const win = new BrowserWindow({ width: 1200, height: 800 });
+  // Links that open a new window (Open in Claude, links in messages) go to the
+  // default browser, where the user is signed in to claude.ai.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
   win.loadURL(UI_URL);
 }
 
 app.whenReady().then(async () => {
+  const short = BUILD_INFO.commit ? BUILD_INFO.commit.slice(0, 7) : 'local';
+  app.setAboutPanelOptions({
+    applicationName: 'Scry',
+    applicationVersion: BUILD_INFO.version,
+    version: `build ${BUILD_INFO.build} · ${short} · ${BUILD_INFO.arch}`,
+    credits: BUILD_INFO.builtAt ? `Built ${BUILD_INFO.builtAt}` : 'Development build',
+  });
   try {
     await createIngestServer({
       dataDir: CONFIG.DATA_DIR,
@@ -32,6 +61,9 @@ app.whenReady().then(async () => {
       pluginDir: CONFIG.PLUGIN_DIR,
       uiFile: path.join(__dirname, 'public', 'app.html'),
       publicDir: path.join(__dirname, 'public'),
+      localProjects: CONFIG.LOCAL_PROJECTS,
+      maxResults: CONFIG.MAX_RESULTS,
+      buildInfo: BUILD_INFO,
     });
   } catch (err) {
     dialog.showErrorBox(

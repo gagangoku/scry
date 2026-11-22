@@ -46,6 +46,41 @@ and when lines arrive. If a project's token is lost, its sessions are
 unrecoverable by anyone; that is the point. The browser needs a secure context
 for WebCrypto: `https://`, or `http://127.0.0.1` / `localhost`.
 
+## macOS app
+
+The landing page's download buttons link to
+[`Scry-mac-arm64.dmg`](https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac-arm64.dmg)
+(Apple Silicon) and
+[`Scry-mac-x64.dmg`](https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac-x64.dmg)
+(Intel). [`.github/workflows/mac-app.yaml`](.github/workflows/mac-app.yaml)
+builds them on a macOS runner with `npm run dist:mac` (electron-builder) and
+replaces the DMGs on the `mac-latest` release. It runs only when triggered by
+hand: Actions → **Build macOS app** → **Run workflow**.
+
+To keep the download small, each DMG holds one architecture (a universal build
+ships Electron twice), only Electron's English locale, and is LZFSE-compressed
+(`ULFO`). The app's version and build (workflow run number, commit, build time)
+show in the header of the UI, in **Scry → About Scry**, and at `GET /version`.
+
+It does not install itself:
+
+1. Open the DMG and drag **Scry** into **Applications**.
+2. The app is ad-hoc signed but not notarized, so Gatekeeper blocks the first
+   launch. Open it once, click **Done**, then in **System Settings → Privacy &
+   Security** click **Open Anyway** next to Scry and confirm. Or clear the
+   quarantine flag and open it normally:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Scry.app
+   ```
+
+3. Point the plugin at `http://127.0.0.1:9999/ingest` with a project's token.
+
+Notarizing (so step 2 goes away) needs an Apple Developer ID certificate and
+electron-builder's `CSC_LINK`/`APPLE_ID` secrets in the workflow, in place of
+`mac.identity: "-"`. The app is packaged without asar because `/plugin` runs
+`tar` on `claude-chat-logger/`, which must be a real directory.
+
 ## Ingest
 
 POST encrypted JSONL lines to `http://127.0.0.1:9999/ingest` with the
@@ -126,8 +161,14 @@ mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-session
 ## UI
 
 - **Project menu** in the header: one project, or **All projects** (every
-  project unlocked in this browser). It scopes both the session list and
-  search. Picking a locked project asks for its token.
+  project readable in this browser: unlocked ones and local ones). It scopes
+  both the session list and search. Picking a locked project asks for its token.
+- **claude-code-local** (Electron app only): a read-only project over the
+  Claude Code transcripts in `~/.claude/projects/` on this machine. Its
+  sessions are `~/.claude/projects/<folder>/<id>.jsonl` (subagent transcripts
+  deeper down are searchable but not listed). These are Claude Code's own
+  plaintext files on your machine, not scry's encrypted store: it has no token,
+  nothing is ingested into it, and the local server reads and searches it as is.
 - **Sessions** sidebar: every session with its name (first prompt, else id),
   id, created time (first line's `ts`) and last-updated time, newest first,
   with a filter box. Refreshes every 20s.
@@ -135,13 +176,22 @@ mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-session
   agent responses on the left with Markdown, collapsible thinking, tool calls
   and results, and a badge on aborted/errored turns. Understands both the
   chat-logger format and raw Claude Code transcript lines.
-- **Search** (`/` to focus): case-insensitive substring scan, run in the
-  browser over the decrypted sessions of the unlocked projects in scope
-  (fetched once and cached until they grow). Clicking a hit opens the session
-  scrolled to that line. The server cannot search: it only holds ciphertext.
-  The Electron app no longer searches `~/.claude/projects/`.
+- Cloud (claude.ai/code) sessions get an **Open in Claude** button in the
+  session header that opens the session's web chat,
+  `https://claude.ai/code/session_01...`. A session counts as a cloud session
+  when its id is a `session_01...` id (the chat-logger plugin's key in cloud
+  sessions; `/sessions` and `/session` answer that link as `webUrl`) or, once
+  decrypted, one of its lines has a `remote_session_id`. In the Electron app it
+  opens in the default browser.
+- **Search** (`/` to focus): case-insensitive substring scan. Encrypted
+  projects are searched in the browser, over the decrypted sessions of the
+  unlocked projects in scope (fetched once and cached until they grow): the
+  server only holds ciphertext and cannot search them. Local projects are
+  searched by the local server (`GET /search`). Clicking a hit opens the
+  session scrolled to that line.
 
-Port and data directory are set in `CONFIG` at the top of `main.js`.
+Port, data directory and local projects are set in `CONFIG` at the top of
+`main.js`.
 
 ## Server (headless)
 
@@ -154,7 +204,7 @@ API: `GET /projects`, `POST /projects {"name","authKey","wrappedKey"}`,
 `POST /projects/token {"name","authKey","wrappedKey"}` (with the current auth
 key in `X-Scry-Key`), `GET /sessions?project=` (each with its first encrypted
 lines in `head`) and `GET /session?project=&id=` (encrypted lines) — the last
-two need the project's auth key in `X-Scry-Key`. `GET /healthz`, `GET /plugin`,
+two need the project's auth key in `X-Scry-Key` (local projects need none). `GET /healthz`, `GET /version`, `GET /plugin`,
 the landing page at `/` and the favicons are always open.
 
 ## Deployment

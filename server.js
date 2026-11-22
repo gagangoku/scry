@@ -13,6 +13,7 @@
 const path = require('path');
 const os = require('os');
 const { createIngestServer } = require('./lib/core');
+const { loadBuildInfo } = require('./lib/build-info');
 
 const env = process.env;
 const DATA_DIR = env.SCRY_DATA_DIR || path.join(os.homedir(), '.jsonl-sessions');
@@ -31,6 +32,7 @@ createIngestServer({
   publicDir: path.join(__dirname, 'public'),
   uiUser: env.SCRY_USER || '',
   uiPass: env.SCRY_PASS || '',
+  buildInfo: { ...loadBuildInfo(), app: 'server' },
 }).then((server) => {
   const { address, port } = server.address();
   console.log(`scry: listening on ${address}:${port}, data in ${DATA_DIR}`);

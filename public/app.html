@@ -93,8 +93,10 @@
       padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2);
       cursor: pointer; color: var(--muted); white-space: nowrap;
     }
+    a.icon-btn { text-decoration: none; }
     .icon-btn:hover { background: var(--hover); color: var(--text); }
     .spacer { flex: 1; }
+    .build { font-size: 11.5px; color: var(--muted); white-space: nowrap; cursor: default; }
 
     /* Layout */
     main { flex: 1; display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
@@ -272,6 +274,7 @@
       <kbd class="hide-sm">/</kbd>
     </label>
     <div class="spacer"></div>
+    <span class="build mono hide-sm" id="build" hidden></span>
     <button class="icon-btn" id="refresh" title="Refresh">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
       <span class="hide-sm">Refresh</span>
@@ -379,6 +382,7 @@
       createProject: (name, keys) => postJson('projects', { name, ...keys }),
       rotateToken: (name, keys) => postJson('projects/token', { name, ...keys }, authHeaders(name)),
       wrappedKey: (authKey) => getJson('ingest/key', { 'x-scry-key': authKey }),
+      search: (query, project) => getJson(`search?q=${encodeURIComponent(query)}` + (project === null ? '' : `&project=${encodeURIComponent(project)}`)),
       sessions: (project) => getJson('sessions?project=' + encodeURIComponent(project), authHeaders(project)),
       session: (project, id) => getJson(`session?project=${encodeURIComponent(project)}&id=${encodeURIComponent(id)}`, authHeaders(project)),
     };
@@ -460,10 +464,15 @@
       const v = projectSel.value;
       return v === ALL || !v ? null : v;
     };
-    // The projects a view covers: the selected one, or every unlocked one.
+    // Local projects (desktop app: Claude Code's own plaintext transcripts on
+    // this machine) are read as they are, with no token.
+    const isLocalProject = (p) => projectsInfo.some((x) => x.name === p && x.local);
+    const readable = (p) => unlocked.has(p) || isLocalProject(p);
+    // The projects a view covers: the selected one, or every readable one.
     const scopeProjects = () => {
       const p = selectedProject();
-      return p === null ? [...unlocked.keys()].sort() : unlocked.has(p) ? [p] : [];
+      if (p !== null) return readable(p) ? [p] : [];
+      return [...unlocked.keys(), ...projectsInfo.filter((x) => x.local).map((x) => x.name)].sort();
     };
     const projectLabel = (p) => p;
     const projectChip = (p) => el('span', { className: 'chip' }, projectLabel(p));
@@ -488,6 +497,13 @@
     // `text` is the plaintext line, `data` its JSON, `plain` marks a line
     // stored unencrypted (from before encryption; scripts/scry-crypt.js migrate).
     async function decryptLines(project, lines) {
+      if (isLocalProject(project)) {
+        return lines.map(({ line, raw }) => {
+          let data;
+          try { data = JSON.parse(raw); } catch (_) { data = undefined; }
+          return { line, text: raw, data, plain: false };
+        });
+      }
       const u = unlocked.get(project);
       return Promise.all(lines.map(async ({ line, raw }) => {
         let text;
@@ -643,7 +659,7 @@
       projectSel.append(el('option', { value: ALL }, 'All projects'));
       await unlockSaved();
       for (const p of projectsInfo) {
-        const label = p.name + (!p.hasKey ? ' (no token)' : unlocked.has(p.name) ? '' : ' 🔒');
+        const label = p.name + (p.local || unlocked.has(p.name) ? '' : !p.hasKey ? ' (no token)' : ' 🔒');
         projectSel.append(el('option', { value: p.name }, label));
       }
       projectSel.value = [...projectSel.options].some((o) => o.value === prev) ? prev : ALL;
@@ -651,7 +667,7 @@
     }
     function updateTokenButton() {
       const p = selectedProject();
-      $('token-btn').hidden = !p;
+      $('token-btn').hidden = !p || isLocalProject(p);
       $('lock-btn').hidden = !p || !unlocked.has(p);
     }
 
@@ -829,6 +845,7 @@
       try {
         list = (await Promise.all(scopeProjects().map((p) => scry.sessions(p)))).flat();
         await Promise.all(list.map(async (s) => {
+          if (!s.head) return; // local: the server read the title
           const m = await headMeta(s).catch(() => ({}));
           s.title = m.title || '';
           if (m.createdAt) s.createdAt = m.createdAt;
@@ -850,7 +867,7 @@
     const lockedInScope = () => {
       const p = selectedProject();
       const names = p === null ? projectsInfo.map((x) => x.name) : [p];
-      return names.filter((n) => !unlocked.has(n));
+      return names.filter((n) => !readable(n));
     };
     function lockedNote() {
       const locked = lockedInScope();
@@ -1024,7 +1041,7 @@
       const seq = ++loadSeq;
       content.innerHTML = '';
       content.append(el('div', { className: 'placeholder' }, 'Loading session…'));
-      if (!unlocked.has(project)) {
+      if (!readable(project)) {
         content.innerHTML = '';
         content.append(el('div', { className: 'empty' },
           el('h3', {}, `“${project}” is locked`),
@@ -1057,6 +1074,15 @@
           setTimeout(() => { copyBtn.textContent = 'Copy id'; }, 1200);
         },
       }, 'Copy id');
+      // Cloud sessions link to their claude.ai web chat: from the session id
+      // (the server sees it), else a decrypted line's remote_session_id.
+      const remote = entries.map((e) => e.data && e.data.remote_session_id)
+        .find((r) => typeof r === 'string' && /^session_01[A-Za-z0-9]+$/.test(r));
+      const webUrl = s.webUrl || (remote ? `https://claude.ai/code/${remote}` : null);
+      const webBtn = webUrl ? el('a', {
+        className: 'icon-btn', href: webUrl, target: '_blank', rel: 'noopener noreferrer',
+        title: 'Open this session’s chat on claude.ai',
+      }, 'Open in Claude ↗') : null;
       content.append(el('div', { className: 'chat-head' },
         backBtn,
         el('div', { className: 'info' },
@@ -1072,6 +1098,7 @@
             entries.some((e) => e.error) ? el('span', { className: 'chip warn' }, `${entries.filter((e) => e.error).length} undecryptable`) : null,
           ),
         ),
+        webBtn,
         copyBtn,
       ));
 
@@ -1137,7 +1164,13 @@
       let done = 0;
       let failed = 0;
       try {
-        const list = (await Promise.all(scopeProjects().map((p) => scry.sessions(p)))).flat()
+        // Local projects are plaintext on the serving machine: the server searches them.
+        const local = scopeProjects().filter(isLocalProject);
+        if (local.length) {
+          const found = (await Promise.all(local.map((p) => scry.search(query, p)))).flat();
+          hits.push(...found.slice(0, MAX_HITS));
+        }
+        const list = (await Promise.all(scopeProjects().filter((p) => !isLocalProject(p)).map((p) => scry.sessions(p)))).flat()
           .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
         const queue = [...list];
         const worker = async () => {
@@ -1169,18 +1202,20 @@
       }
       if (seq !== searchSeq) return;
       const sel = selectedProject();
-      const scope = sel === null ? 'unlocked projects' : projectLabel(sel);
+      const scope = sel === null ? 'readable projects' : projectLabel(sel);
       const locked = lockedInScope();
       wrap.firstChild.textContent = `${hits.length}${hits.length >= MAX_HITS ? '+' : ''} result${hits.length === 1 ? '' : 's'} for “${query}” in ${scope}`
         + (locked.length ? ` (${locked.length} locked project${locked.length === 1 ? '' : 's'} not searched)` : '')
         + (failed ? ` · ${failed} session${failed === 1 ? '' : 's'} could not be loaded` : '');
       for (const h of hits) {
+        const linked = h.session !== undefined;
         wrap.append(el('button', {
-          className: 'hit',
-          onclick: () => openSession(h.project, h.session, h.line),
+          className: 'hit' + (linked ? '' : ' static'),
+          onclick: linked ? () => openSession(h.project, h.session, h.line) : null,
         },
           el('div', { className: 'loc' },
-            projectChip(h.project), el('span', { className: 'mono' }, `${h.session} · line ${h.line}`)),
+            linked ? [projectChip(h.project), el('span', { className: 'mono' }, `${h.session} · line ${h.line}`)]
+              : el('span', { className: 'mono' }, `${h.file}:${h.line}`)),
           el('div', { className: 'snippet mono' }, highlight(h.snippet, query)),
         ));
       }
@@ -1232,6 +1267,22 @@
     window.addEventListener('popstate', route);
     // Keep the list fresh while the window is visible.
     setInterval(() => { if (!document.hidden) loadSessions(); }, 20000);
+
+    // Version and build of the app or server that served this page, in the
+    // header, with the full details on hover.
+    getJson('/version').then((b) => {
+      const short = b.commit ? b.commit.slice(0, 7) : '';
+      const badge = $('build');
+      badge.textContent = `v${b.version}` + (b.build && b.build !== 'dev' ? ` (${b.build})` : ' dev');
+      badge.title = [
+        `Scry ${b.version}`,
+        `Build ${b.build}`,
+        short && `Commit ${short}`,
+        b.builtAt && `Built ${fmtFull(b.builtAt)}`,
+        b.app === 'mac' ? `macOS app · ${b.arch} · Electron ${b.electron}` : b.app === 'server' ? 'Server' : '',
+      ].filter(Boolean).join('\n');
+      badge.hidden = false;
+    }).catch(() => { /* older server without /version */ });
 
     (async () => {
       await loadProjects();

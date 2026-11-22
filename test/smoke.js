@@ -5,7 +5,7 @@ const path = require('path');
 const http = require('http');
 const { execFileSync } = require('child_process');
 const {
-  createIngestServer, listProjects, listSessions, readSession,
+  createIngestServer, listProjects, listSessions, readSession, searchJsonl,
   createProject, rotateProjectToken, projectForAuthKey, projectInfo, wrappedKeyFor,
 } = require('../lib/core');
 const sc = require('../lib/crypto');
@@ -175,6 +175,46 @@ const allBytes = (dir) => fs.readdirSync(dir, { recursive: true })
   assert.strictEqual(sess.lines.length, 3);
   assert.strictEqual(JSON.parse(sc.decryptLine(work.dataKey, 'work', sess.lines[1].raw)).response, 'alpha two');
   assert.strictEqual(await readSession({ dataDir, project: 'work', id: 'nope' }), null);
+  assert.strictEqual(list[0].webUrl, null);
+
+  // Cloud sessions carry their claude.ai web chat URL when the session id is a
+  // session_01... id (a remote_session_id inside an encrypted line is only
+  // visible to the client)
+  const webDir = path.join(tmp, 'web-data');
+  fs.mkdirSync(path.join(webDir, 'w'), { recursive: true });
+  fs.writeFileSync(path.join(webDir, 'w', 'session_01Abc.jsonl'), encLine + '\n');
+  fs.writeFileSync(path.join(webDir, 'w', 'uuid-1.jsonl'), encLine + '\n');
+  const web = Object.fromEntries(listSessions({ dataDir: webDir, project: 'w' }).map((x) => [x.id, x.webUrl]));
+  assert.strictEqual(web['session_01Abc'], 'https://claude.ai/code/session_01Abc');
+  assert.strictEqual(web['uuid-1'], null);
+
+  // A local project over Claude Code's own plaintext transcripts (~/.claude/projects)
+  const localRoot = path.join(tmp, 'local-claude');
+  const localProjects = { 'claude-code-local': localRoot };
+  fs.mkdirSync(path.join(localRoot, '-home-me-repo', 'abc', 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(localRoot, '-home-me-repo', 'abc.jsonl'),
+    '{"type":"summary"}\n{"type":"user","timestamp":"2026-03-04T05:06:07Z","message":{"role":"user","content":"local delta"}}\n');
+  fs.writeFileSync(path.join(localRoot, '-home-me-repo', 'uuid-2.jsonl'),
+    '{"kind":"prompt","prompt":"x","remote_session_id":"session_01Xyz"}\n');
+  fs.writeFileSync(path.join(localRoot, '-home-me-repo', 'abc', 'subagents', 'agent-1.jsonl'), '{"msg":"delta sub"}\n');
+  assert.deepStrictEqual(projectInfo(dataDir, localProjects).map((p) => [p.name, p.local]),
+    [['personal', false], ['work', false], ['claude-code-local', true]]);
+  list = listSessions({ dataDir, project: 'claude-code-local', localProjects });
+  const abc = list.find((x) => x.id === 'abc');
+  assert.strictEqual(abc.title, 'local delta');
+  assert.strictEqual(abc.createdAt, '2026-03-04T05:06:07.000Z');
+  assert.strictEqual(list.find((x) => x.id === 'uuid-2').webUrl, 'https://claude.ai/code/session_01Xyz');
+  assert.strictEqual(list.length, 2);
+  const localSess = await readSession({ dataDir, project: 'claude-code-local', id: 'abc', localProjects });
+  assert.strictEqual(localSess.lines.length, 2);
+  assert.strictEqual(await readSession({ dataDir, project: 'claude-code-local', id: 'agent-1', localProjects }), null);
+  let hits = await searchJsonl({ localProjects, names: ['claude-code-local'], query: 'delta' });
+  assert.strictEqual(hits.length, 2);
+  const localHit = hits.find((h) => h.session === 'abc');
+  assert.strictEqual(localHit.project, 'claude-code-local');
+  assert.strictEqual(hits.find((h) => h !== localHit).session, undefined);
+  assert.throws(() => createProject(dataDir, 'claude-code-local', sc.newProjectKeys('claude-code-local'), localProjects), (e) => e.status === 409);
+  assert.throws(() => rotateProjectToken(dataDir, 'claude-code-local', {}, '', localProjects), (e) => e.status === 400);
 
   // scry-crypt encrypt / decrypt / auth-key against the server
   const cliEnv = { ...process.env, SCRY_INGEST_TOKEN: work2Token, SCRY_INGEST_URL: `http://127.0.0.1:${port}/ingest` };
@@ -219,7 +259,10 @@ const allBytes = (dir) => fs.readdirSync(dir, { recursive: true })
   const publicDir = path.join(tmp, 'public');
   fs.mkdirSync(publicDir);
   fs.writeFileSync(path.join(publicDir, 'favicon.svg'), '<svg/>');
-  const uiServer = await createIngestServer({ dataDir, port: 0, uiFile, landingFile, publicDir, uiUser: 'u', uiPass: 'p' });
+  const uiServer = await createIngestServer({
+    dataDir, port: 0, uiFile, landingFile, publicDir, uiUser: 'u', uiPass: 'p', localProjects,
+    buildInfo: { version: '9.9.9', build: '42' },
+  });
   const uiPort = uiServer.address().port;
   const get = (p, headers = {}) => request(uiPort, 'GET', p, undefined, headers);
   const send = (p, body, headers = {}) => request(uiPort, 'POST', p, body, headers);
@@ -227,6 +270,15 @@ const allBytes = (dir) => fs.readdirSync(dir, { recursive: true })
   const B = basic('u', 'p');
 
   assert.strictEqual((await get('/healthz')).status, 200);
+  // /version names the build, without auth
+  r = await get('/version');
+  assert.strictEqual(r.status, 200);
+  assert.deepStrictEqual(r.json, { version: '9.9.9', build: '42' });
+  // Build info: package.json version, "dev" without build-info.json
+  const { loadBuildInfo } = require('../lib/build-info');
+  const bi = loadBuildInfo();
+  assert.strictEqual(bi.version, require('../package.json').version);
+  assert.strictEqual(bi.build, fs.existsSync(path.join(__dirname, '..', 'build-info.json')) ? bi.build : 'dev');
   r = await get('/');
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.data, '<p>scry landing</p>');
@@ -241,11 +293,22 @@ const allBytes = (dir) => fs.readdirSync(dir, { recursive: true })
   r = await get('/app', B);
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.data, '<p>scry ui</p>');
-  // Server-side search is gone: the server cannot read what it would search
-  assert.strictEqual((await get('/search?q=alpha', B)).status, 404);
+  // The server only searches local projects: it cannot read encrypted ones
+  assert.strictEqual((await get('/search?q=alpha&project=work', B)).status, 400);
+  r = await get('/search?q=delta', B);
+  assert.strictEqual(r.json.length, 2);
+  r = await get('/search?q=delta&project=claude-code-local', B);
+  assert.strictEqual(r.json.filter((h) => h.session === 'abc').length, 1);
   assert.strictEqual((await get('/projects')).status, 401);
   r = await get('/projects', B);
-  assert.deepStrictEqual(r.json.map((x) => [x.name, x.hasKey]), [['personal', true], ['work', true]]);
+  assert.deepStrictEqual(r.json.map((x) => [x.name, x.hasKey, x.local]),
+    [['personal', true, false], ['work', true, false], ['claude-code-local', false, true]]);
+  // Local projects need no key (basic auth still applies)
+  assert.strictEqual((await get('/sessions?project=claude-code-local')).status, 401);
+  r = await get('/sessions?project=claude-code-local', B);
+  assert.deepStrictEqual(r.json.map((x) => x.id).sort(), ['abc', 'uuid-2']);
+  r = await get('/session?project=claude-code-local&id=abc', B);
+  assert.strictEqual(r.json.lines.length, 2);
 
   // Reading sessions needs both basic auth and the project's key
   assert.strictEqual((await get('/sessions?project=work', { 'x-scry-key': work2.authKey })).status, 401);

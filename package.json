@@ -1,14 +1,58 @@
 {
   "name": "scry",
+  "productName": "Scry",
   "version": "1.0.0",
   "description": "Electron app: ingest Claude transcript JSONL lines over HTTP into per-session files and search them",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "serve": "node server.js",
-    "test": "node test/smoke.js"
+    "test": "node test/smoke.js",
+    "dist:mac": "electron-builder --mac --arm64 --x64 --publish never"
+  },
+  "build": {
+    "appId": "ai.teltrix.scry",
+    "productName": "Scry",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "package.json",
+      "build-info.json",
+      "lib/**",
+      "public/**",
+      "claude-chat-logger/**"
+    ],
+    "asar": false,
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "artifactName": "Scry-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "Scry",
+      "format": "ULFO"
+    },
+    "electronLanguages": [
+      "en"
+    ],
+    "compression": "maximum"
   },
   "devDependencies": {
-    "electron": "^33.2.0"
+    "electron": "^33.2.0",
+    "electron-builder": "^26.18.0"
   }
 }
