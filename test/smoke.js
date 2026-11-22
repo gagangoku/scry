@@ -103,11 +103,14 @@ function post(port, body, headers = {}) {
   assert.deepStrictEqual(listProjects(dataDir), ['personal', 'work', '']);
   // A folder from before tokens existed shows up without a token until one is issued
   fs.mkdirSync(path.join(dataDir, 'old'));
+  // Filesystem folders that are not valid project names are not projects
+  fs.mkdirSync(path.join(dataDir, 'lost+found'));
   assert.deepStrictEqual(projectInfo(dataDir).map((p) => [p.name, p.hasToken]),
     [['old', false], ['personal', true], ['work', true], ['', false]]);
   const old = rotateProjectToken(dataDir, 'old');
   assert.strictEqual(projectForToken(dataDir, old.token), 'old');
   fs.rmSync(path.join(dataDir, 'old'), { recursive: true });
+  fs.rmSync(path.join(dataDir, 'lost+found'), { recursive: true });
   const reg = JSON.parse(fs.readFileSync(path.join(dataDir, '.scry', 'projects.json'), 'utf8'));
   delete reg.projects.old;
   fs.writeFileSync(path.join(dataDir, '.scry', 'projects.json'), JSON.stringify(reg));
