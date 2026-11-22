@@ -1,0 +1,5 @@
+{
+  "name": "chat-logger",
+  "version": "0.1.0",
+  "description": "Logs each user prompt and agent response to a local JSONL file and the scry ingest endpoint; search with /chat-search"
+}

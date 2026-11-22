@@ -1,0 +1,13 @@
+{
+  "name": "scry",
+  "version": "1.0.0",
+  "description": "Electron app: ingest Claude transcript JSONL lines over HTTP into per-session files and search them",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/smoke.js"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}

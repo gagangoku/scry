@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Scry</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; margin: 0; padding: 16px; background: #1e1e1e; color: #ddd; }
+    #bar { display: flex; gap: 8px; }
+    input { flex: 1; padding: 8px 12px; font-size: 15px; border-radius: 6px; border: 1px solid #444; background: #2a2a2a; color: #eee; }
+    button { padding: 8px 16px; border-radius: 6px; border: none; background: #0a84ff; color: white; font-size: 15px; cursor: pointer; }
+    #meta { margin: 10px 0; color: #888; font-size: 13px; }
+    .hit { padding: 8px 10px; border-bottom: 1px solid #333; }
+    .hit .loc { color: #6ab0f3; font-size: 12px; word-break: break-all; }
+    .hit .snippet { font-family: ui-monospace, monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <input id="q" placeholder="Search session JSONL files…" autofocus />
+    <button id="go">Search</button>
+  </div>
+  <div id="meta"></div>
+  <div id="results"></div>
+  <script>
+    const q = document.getElementById('q');
+    const meta = document.getElementById('meta');
+    const results = document.getElementById('results');
+
+    window.api.config().then((cfg) => {
+      meta.textContent = `Ingest: POST JSONL to http://${cfg.HOST}:${cfg.PORT}/ingest — searching: ${cfg.SEARCH_DIRS.join(', ')}`;
+    });
+
+    async function run() {
+      const query = q.value.trim();
+      if (!query) return;
+      results.textContent = 'Searching…';
+      const hits = await window.api.search(query);
+      results.innerHTML = '';
+      meta.textContent = `${hits.length} result(s)`;
+      for (const h of hits) {
+        const div = document.createElement('div');
+        div.className = 'hit';
+        const loc = document.createElement('div');
+        loc.className = 'loc';
+        loc.textContent = `${h.file}:${h.line}`;
+        const snippet = document.createElement('div');
+        snippet.className = 'snippet';
+        snippet.textContent = h.snippet;
+        div.append(loc, snippet);
+        results.append(div);
+      }
+    }
+
+    document.getElementById('go').addEventListener('click', run);
+    q.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+  </script>
+</body>
+</html>
