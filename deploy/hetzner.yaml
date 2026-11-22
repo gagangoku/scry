@@ -19,12 +19,6 @@
 #   kubectl apply -f deploy/hetzner.yaml
 #   (Keel rolls out each new :latest pushed by CI)
 #
-# Moving an existing scry-data claim onto hcloud-volumes (the storage class
-# can't be edited in place, and this drops whatever the old volume held):
-#   kubectl scale deploy/scry --replicas=0
-#   kubectl delete pvc scry-data
-#   kubectl apply -f deploy/hetzner.yaml
-#
 # Senders (claude-chat-logger) then use:
 #   SCRY_INGEST_URL=https://scry.teltrix.ai/ingest
 #   SCRY_INGEST_TOKEN=<same token>
@@ -39,8 +33,7 @@ metadata:
 spec:
   # Hetzner Cloud CSI volume. Without this the claim falls back to the
   # cluster's default StorageClass (often node-local), and no volume shows up
-  # in the Hetzner console. storageClassName can't be changed on an existing
-  # claim: delete the old PVC first (see the migration notes above).
+  # in the Hetzner console. storageClassName can't be changed on an existing claim
   storageClassName: hcloud-volumes
   accessModes: ["ReadWriteOnce"]
   resources:
