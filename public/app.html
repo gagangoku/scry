@@ -439,7 +439,7 @@
       projectSel.innerHTML = '';
       projectSel.append(el('option', { value: ALL }, 'All projects'));
       for (const p of projectsInfo) {
-        const label = p.name === '' ? '(no project)' : p.name + (p.hasToken ? '' : ' (no token)');
+        const label = p.name === '' ? '(no project)' : p.name + (p.local || p.hasToken ? '' : ' (no token)');
         projectSel.append(el('option', { value: p.name === '' ? NONE : p.name }, label));
       }
       projectSel.value = [...projectSel.options].some((o) => o.value === prev) ? prev : ALL;
@@ -447,7 +447,8 @@
     }
     function updateTokenButton() {
       const p = selectedProject();
-      $('token-btn').hidden = !p;
+      const info = projectsInfo.find((x) => x.name === p);
+      $('token-btn').hidden = !p || Boolean(info && info.local);
     }
 
     // ---------- project dialog ----------
