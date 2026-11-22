@@ -20,13 +20,19 @@ quits if the port is taken.
 
 ## macOS app
 
-The landing page's **Download for macOS** button links to
-[`Scry-mac.dmg`](https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac.dmg),
-a universal (Apple Silicon + Intel) build.
-[`.github/workflows/mac-app.yaml`](.github/workflows/mac-app.yaml) builds it on
-a macOS runner with `npm run dist:mac` (electron-builder) whenever the app's
-files change on `master`, or on demand from the Actions tab, and replaces the
-DMG on the `mac-latest` release.
+The landing page's download buttons link to
+[`Scry-mac-arm64.dmg`](https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac-arm64.dmg)
+(Apple Silicon) and
+[`Scry-mac-x64.dmg`](https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac-x64.dmg)
+(Intel). [`.github/workflows/mac-app.yaml`](.github/workflows/mac-app.yaml)
+builds them on a macOS runner with `npm run dist:mac` (electron-builder) and
+replaces the DMGs on the `mac-latest` release. It runs only when triggered by
+hand: Actions → **Build macOS app** → **Run workflow**.
+
+To keep the download small, each DMG holds one architecture (a universal build
+ships Electron twice), only Electron's English locale, and is LZFSE-compressed
+(`ULFO`). The app's version and build (workflow run number, commit, build time)
+show in the header of the UI, in **Scry → About Scry**, and at `GET /version`.
 
 It does not install itself:
 

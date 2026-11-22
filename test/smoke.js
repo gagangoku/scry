@@ -218,6 +218,7 @@ function post(port, body, headers = {}) {
   fs.writeFileSync(path.join(publicDir, 'favicon.svg'), '<svg/>');
   const uiServer = await createIngestServer({
     dataDir, port: 0, uiFile, landingFile, publicDir, searchDirs: [dataDir], uiUser: 'u', uiPass: 'p', localProjects,
+    buildInfo: { version: '9.9.9', build: '42' },
   });
   const uiPort = uiServer.address().port;
   const get = (p, headers = {}) => new Promise((resolve, reject) => {
@@ -230,6 +231,15 @@ function post(port, body, headers = {}) {
   const basic = (u, p) => ({ authorization: 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64') });
 
   assert.strictEqual((await get('/healthz')).status, 200);
+  // /version names the build, without auth
+  let v = await get('/version');
+  assert.strictEqual(v.status, 200);
+  assert.deepStrictEqual(JSON.parse(v.data), { version: '9.9.9', build: '42' });
+  // Build info: package.json version, "dev" without build-info.json
+  const { loadBuildInfo } = require('../lib/build-info');
+  const bi = loadBuildInfo();
+  assert.strictEqual(bi.version, require('../package.json').version);
+  assert.strictEqual(bi.build, fs.existsSync(path.join(__dirname, '..', 'build-info.json')) ? bi.build : 'dev');
   // The landing page and favicons are public; the sessions viewer at /app is not
   let r = await get('/');
   assert.strictEqual(r.status, 200);

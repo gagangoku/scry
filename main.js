@@ -2,6 +2,14 @@ const { app, BrowserWindow, dialog, shell } = require('electron');
 const path = require('path');
 const os = require('os');
 const { createIngestServer } = require('./lib/core');
+const { loadBuildInfo } = require('./lib/build-info');
+
+const BUILD_INFO = {
+  ...loadBuildInfo(),
+  app: 'mac',
+  arch: process.arch,
+  electron: process.versions.electron,
+};
 
 // All configuration lives here.
 const CONFIG = {
@@ -37,6 +45,13 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  const short = BUILD_INFO.commit ? BUILD_INFO.commit.slice(0, 7) : 'local';
+  app.setAboutPanelOptions({
+    applicationName: 'Scry',
+    applicationVersion: BUILD_INFO.version,
+    version: `build ${BUILD_INFO.build} · ${short} · ${BUILD_INFO.arch}`,
+    credits: BUILD_INFO.builtAt ? `Built ${BUILD_INFO.builtAt}` : 'Development build',
+  });
   try {
     await createIngestServer({
       dataDir: CONFIG.DATA_DIR,
@@ -48,6 +63,7 @@ app.whenReady().then(async () => {
       searchDirs: CONFIG.SEARCH_DIRS,
       localProjects: CONFIG.LOCAL_PROJECTS,
       maxResults: CONFIG.MAX_RESULTS,
+      buildInfo: BUILD_INFO,
     });
   } catch (err) {
     dialog.showErrorBox(

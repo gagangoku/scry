@@ -1,21 +1,13 @@
 name: Build macOS app
 
-# Builds the Electron app as a universal (Apple Silicon + Intel) DMG and
-# publishes it to the `mac-latest` GitHub release, which the landing page's
-# download button links to:
-# https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac.dmg
+# Builds the Electron app as two DMGs, Apple Silicon (arm64) and Intel (x64),
+# and publishes them to the `mac-latest` GitHub release, which the landing
+# page's download buttons link to:
+# https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac-arm64.dmg
+# https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac-x64.dmg
+# Scry-mac.dmg stays on the release as a copy of the arm64 DMG for old links.
+# Runs only on demand, from the Actions tab (Run workflow).
 on:
-  push:
-    branches: [master]
-    paths:
-      - main.js
-      - lib/**
-      - public/**
-      - claude-chat-logger/**
-      - build/**
-      - package.json
-      - package-lock.json
-      - .github/workflows/mac-app.yaml
   workflow_dispatch:
 
 permissions:
@@ -39,11 +31,27 @@ jobs:
 
       - run: npm test
 
+      # Stamped into the app: GET /version, the header badge, About Scry.
+      - name: Write build-info.json
+        run: |
+          cat > build-info.json <<EOF
+          {
+            "build": "${{ github.run_number }}",
+            "commit": "${{ github.sha }}",
+            "ref": "${{ github.ref_name }}",
+            "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          cat build-info.json
+
       # Ad-hoc signed (mac.identity "-"), not notarized: no Apple Developer
       # account is needed, and users clear Gatekeeper once on first launch.
-      - run: npm run dist:mac
+      - run: npm run dist:mac -- -c.buildVersion=${{ github.run_number }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: DMG sizes
+        run: ls -lh dist/*.dmg
 
       - name: Publish to the mac-latest release
         env:
@@ -54,4 +62,5 @@ jobs:
           gh release view mac-latest >/dev/null 2>&1 || gh release create mac-latest \
             --title "Scry for macOS" \
             --notes "Latest build of the Scry desktop app from master. Install steps: https://github.com/gagangoku/scry#macos-app"
-          gh release upload mac-latest dist/Scry-mac.dmg --clobber
+          cp dist/Scry-mac-arm64.dmg dist/Scry-mac.dmg
+          gh release upload mac-latest dist/Scry-mac-arm64.dmg dist/Scry-mac-x64.dmg dist/Scry-mac.dmg --clobber
