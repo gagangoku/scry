@@ -424,8 +424,8 @@
           </div>
           <div class="card reveal">
             <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2.5 2.5"/></svg></div>
-            <h3>Scoped ingest tokens</h3>
-            <p>Each project gets its own token, stored only as a hash. A token can write to its own project and nothing else, and rotating it retires the old one instantly.</p>
+            <h3>End-to-end encrypted</h3>
+            <p>Each project's token is made in your browser and never sent to the server. Sessions are encrypted before they leave Claude Code and decrypted only where the token is, so the server stores nothing it can read.</p>
           </div>
         </div>
       </div>
@@ -443,7 +443,7 @@
             <div>
               <div class="step-n"></div>
               <h3>Create a project</h3>
-              <p>Open the app and click <b>New project</b>. Scry shows the project's ingest token once. Keep it somewhere safe.</p>
+              <p>Open the app and click <b>New project</b>. Your browser makes the project's token and Scry shows it once. Keep it somewhere safe: it is the only key to the project's sessions.</p>
             </div>
             <div class="code">
               <div class="code-h"><span>Scry app</span><a class="copy" href="/app" style="text-decoration:none">Open app</a></div>
@@ -518,10 +518,10 @@
           <h2>Your transcripts never leave your infrastructure.</h2>
           <p class="sec-lede">Agent conversations are full of code, credentials in error messages, and design decisions. Scry runs on your own servers, so they stay yours.</p>
           <ul class="checks">
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>One small container.</b> Node with no runtime dependencies, sessions stored as plain JSONL files on a volume.</span></li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>Locked down by default.</b> The app sits behind basic auth; ingest only accepts project tokens.</span></li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>No lock-in.</b> Your data is files you can grep, back up or move. Nothing proprietary.</span></li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>Desktop too.</b> Prefer local? The macOS app runs the same UI and also searches <code class="mono">~/.claude/projects</code>.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>One small container.</b> Node with no runtime dependencies, sessions stored as encrypted JSONL files on a volume.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>Zero trust.</b> Sessions are end-to-end encrypted with the project's token. Neither the server, its operator nor its backups can read them.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>No lock-in.</b> Your data is files you can back up or move, and decrypt with your token and a small open script.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>Desktop too.</b> Prefer local? The macOS app runs the same UI on your own machine.</span></li>
           </ul>
         </div>
         <div class="arch reveal" aria-label="Claude Code sessions send turns to a Scry server, which stores them on a volume and serves the app">
@@ -581,7 +581,7 @@
           </details>
           <details>
             <summary>Can I keep work and personal sessions separate?</summary>
-            <p>Yes. Create a project per Claude account or team and give each its own <code>SCRY_PROJECT</code> and token. A token can only write to its own project, and the app lets you browse one project or all of them.</p>
+            <p>Yes. Create a project per Claude account or team and give each its own <code>SCRY_PROJECT</code> and token. A token can only write to and read its own project, and the app lets you browse one project or all the ones you have unlocked.</p>
           </details>
           <details>
             <summary>How do I deploy it?</summary>

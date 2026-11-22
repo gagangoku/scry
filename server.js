@@ -6,10 +6,10 @@
 //   PORT               listen port (default 9999)
 //   HOST               listen address (default 0.0.0.0)
 //   SCRY_DATA_DIR      where ingested sessions land (default ~/.jsonl-sessions)
-//   SCRY_SEARCH_DIRS   extra dirs to search, ':'-separated (the data dir is always searched)
-// Ingest tokens are not configured here: each project gets its own, created
-// in the UI and stored (hashed) in the data dir.
-//   SCRY_USER / SCRY_PASS  when set, the UI and /search require basic auth
+// Tokens are not configured here: each project gets its own, made in the
+// browser when the project is created. Sessions are end-to-end encrypted with
+// it; the server only stores ciphertext and a hash of a key derived from it.
+//   SCRY_USER / SCRY_PASS  when set, the UI requires basic auth
 const path = require('path');
 const os = require('os');
 const { createIngestServer } = require('./lib/core');
@@ -17,10 +17,9 @@ const { loadBuildInfo } = require('./lib/build-info');
 
 const env = process.env;
 const DATA_DIR = env.SCRY_DATA_DIR || path.join(os.homedir(), '.jsonl-sessions');
-const SEARCH_DIRS = [DATA_DIR, ...(env.SCRY_SEARCH_DIRS || '').split(':').filter(Boolean)];
 
 if (!env.SCRY_USER) {
-  console.warn('scry: warning: SCRY_USER is not set, the search UI is open to anyone');
+  console.warn('scry: warning: SCRY_USER is not set, anyone can create projects (sessions stay encrypted)');
 }
 
 createIngestServer({
@@ -31,7 +30,6 @@ createIngestServer({
   uiFile: path.join(__dirname, 'public', 'app.html'),
   landingFile: path.join(__dirname, 'public', 'index.html'),
   publicDir: path.join(__dirname, 'public'),
-  searchDirs: SEARCH_DIRS,
   uiUser: env.SCRY_USER || '',
   uiPass: env.SCRY_PASS || '',
   buildInfo: { ...loadBuildInfo(), app: 'server' },

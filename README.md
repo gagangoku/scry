@@ -1,8 +1,9 @@
 # scry
 
-Electron app for macOS to scry Claude transcripts. It runs a local HTTP server that accepts JSONL lines,
-appends them to per-session files on disk, and gives a search UI over those
-files plus `~/.claude/projects/`.
+Electron app for macOS (or a headless server) to scry Claude transcripts. It
+runs an HTTP server that accepts end-to-end encrypted JSONL lines, appends them
+to per-session files on disk, and gives a UI that decrypts, browses and
+searches them in the browser of whoever holds the project's token.
 
 ## Run
 
@@ -17,6 +18,33 @@ while the app runs, `http://127.0.0.1:9999/app` opens the same UI in any browser
 That server listens on localhost only, without basic auth. Only one of the app
 and `npm run serve` can hold port 9999 at a time; the app shows an error and
 quits if the port is taken.
+
+## End-to-end encryption
+
+scry is zero-trust: sessions are encrypted on the sending machine, stored as
+ciphertext, and decrypted only in the browser of someone who holds the
+project's token. The server, its operator, and anyone with a copy of the disk
+or a backup cannot read them. The scheme is in [`lib/crypto.js`](lib/crypto.js)
+(and mirrored in `public/app.html` and the plugin):
+
+- The token is made in the browser when a project is created and is **never
+  sent to the server**. From it, HKDF-SHA256 derives an *auth key* (the
+  credential the server checks; it stores only a SHA-256 of it) and a
+  *key-encryption key* that never leaves the client.
+- Each project has a random 256-bit data key, made in the browser. The server
+  keeps it only wrapped (AES-256-GCM) by the key-encryption key.
+- Every line is sealed with the data key (AES-256-GCM, random IV, bound to the
+  project name) into `{"v":1,"iv":…,"ct":…}` before it is sent. `/ingest`
+  refuses anything else, so plaintext never reaches the disk.
+- The viewer unwraps the data key with the token, then decrypts sessions and
+  runs search locally. Tokens unlocked in a browser stay in that tab's
+  `sessionStorage`, or `localStorage` with **Remember on this device**; **Lock**
+  forgets one.
+
+What the server still sees: project names, session ids, line counts and sizes,
+and when lines arrive. If a project's token is lost, its sessions are
+unrecoverable by anyone; that is the point. The browser needs a secure context
+for WebCrypto: `https://`, or `http://127.0.0.1` / `localhost`.
 
 ## macOS app
 
@@ -55,31 +83,37 @@ electron-builder's `CSC_LINK`/`APPLE_ID` secrets in the workflow, in place of
 
 ## Ingest
 
-POST JSONL lines to `http://127.0.0.1:9999/ingest` with a project's token
-(see [Projects and tokens](#projects-and-tokens)). Every line needs a
-**project**: the `X-Project` header, else a `project` field in the line. A
-request where any line has no project is rejected with `400` and nothing is
-written. Projects keep different Claude accounts' sessions apart (e.g. `work`,
-`personal`). The session id comes from the `X-Session-Id` header, else a
-`sessionId` field in each line, else `default`. Lines land in
-`~/.jsonl-sessions/<project>/<sessionId>.jsonl`.
+POST encrypted JSONL lines to `http://127.0.0.1:9999/ingest` with the
+project's auth key as `Authorization: Bearer <authKey>` (`X-Scry-Key` also
+works). The project is the auth key's own; an `X-Project` header naming another
+gets `403`. A request with any plaintext line is rejected with `400` and
+nothing is written. The session id comes from the `X-Session-Id` header, else a
+`sessionId` field next to the envelope, else `default`. Lines land in
+`~/.jsonl-sessions/<project>/<sessionId>.jsonl`. `GET /ingest/key` (same auth)
+answers the project's wrapped data key, which a sender unwraps with its token.
+
+The claude-chat-logger plugin does all of this. By hand, use
+[`scripts/scry-crypt.js`](scripts/scry-crypt.js), which reads the token from
+the environment:
 
 ```bash
-curl -X POST -H "Authorization: Bearer $SCRY_INGEST_TOKEN" \
-  -H 'X-Project: work' -H 'X-Session-Id: my-session' \
-  --data-binary $'{"msg":"hello"}\n{"msg":"world"}' \
-  http://127.0.0.1:9999/ingest
+export SCRY_INGEST_TOKEN=scry_... SCRY_INGEST_URL=http://127.0.0.1:9999/ingest
+printf '%s\n' '{"msg":"hello"}' '{"msg":"world"}' | node scripts/scry-crypt.js encrypt \
+  | curl -X POST -H "Authorization: Bearer $(node scripts/scry-crypt.js auth-key)" \
+      -H 'X-Session-Id: my-session' --data-binary @- "$SCRY_INGEST_URL"
 ```
+
+`scry-crypt.js decrypt` turns a stored session file back into plaintext, given
+the token.
 
 ### Projects and tokens
 
-Ingest tokens belong to projects, not to the deployment. In the app, **New
-project** creates a project and shows its token once; **Token** (with a project
-selected) replaces it, retiring the old one, or issues the first token for a
-project folder from before tokens existed. `/ingest` needs
-`Authorization: Bearer <token>` (401 otherwise), and a token only writes to its
-own project (403 for lines naming another). Tokens are stored as SHA-256 hashes
-in `<dataDir>/.scry/projects.json`; scry cannot show a token again.
+In the app, **New project** creates a project: the browser makes its token and
+data key and shows the token once. **Token** (with a project selected) replaces
+the token: unlock the project with the current one first, since the new token
+must wrap the same data key; existing sessions stay readable with the new token
+and the old one stops working for sending and reading. A project without a key
+(a folder from before encryption) can be given its first token without one.
 
 Give each Claude account its own project and set `SCRY_PROJECT` and
 `SCRY_INGEST_TOKEN` in that account's environment; the claude-chat-logger
@@ -93,11 +127,22 @@ environment setup scripts install the plugin from this endpoint (see the
 plugin's README); it is unauthenticated because setup scripts cannot read
 secrets, and the tarball is just the plugin's code.
 
-### Migrating pre-project data
+### Migrating data from before encryption
 
-Files ingested before projects existed sit directly in the data dir. The UI
-still shows them under **(no project)**; to assign them a project, move them
-into a subdirectory:
+Tokens from before encryption no longer work (the server stored a hash of the
+token itself, and senders sent plaintext). For each project: select it in the
+app, click **Token** to give it a new token, update `SCRY_INGEST_TOKEN` where
+it is used, then encrypt its stored sessions in place on the server's disk:
+
+```bash
+SCRY_INGEST_TOKEN=scry_... node scripts/scry-crypt.js migrate --data-dir ~/.jsonl-sessions --project work
+```
+
+(In the Docker image: `kubectl exec -it deploy/scry -- env SCRY_INGEST_TOKEN=scry_... node scripts/scry-crypt.js migrate --data-dir /data --project work`.)
+This is the one step where the token is used on the server, once, to encrypt
+data that was already sitting there in plaintext. Until it runs, the viewer
+shows those lines with an "unencrypted" badge. Files from before projects
+existed, directly in the data dir, must first be moved into a project folder:
 
 ```bash
 mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-sessions/work/
@@ -115,13 +160,15 @@ mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-session
 
 ## UI
 
-- **Project menu** in the header: one project, or **All projects**. It scopes
-  both the session list and search.
+- **Project menu** in the header: one project, or **All projects** (every
+  project readable in this browser: unlocked ones and local ones). It scopes
+  both the session list and search. Picking a locked project asks for its token.
 - **claude-code-local** (Electron app only): a read-only project over the
   Claude Code transcripts in `~/.claude/projects/` on this machine. Its
   sessions are `~/.claude/projects/<folder>/<id>.jsonl` (subagent transcripts
-  deeper down are searchable but not listed). It has no token, and nothing is
-  ingested into it.
+  deeper down are searchable but not listed). These are Claude Code's own
+  plaintext files on your machine, not scry's encrypted store: it has no token,
+  nothing is ingested into it, and the local server reads and searches it as is.
 - **Sessions** sidebar: every session with its name (first prompt, else id),
   id, created time (first line's `ts`) and last-updated time, newest first,
   with a filter box. Refreshes every 20s.
@@ -133,30 +180,32 @@ mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-session
   session header that opens the session's web chat,
   `https://claude.ai/code/session_01...`. A session counts as a cloud session
   when its id is a `session_01...` id (the chat-logger plugin's key in cloud
-  sessions) or one of its first lines has a `remote_session_id`; `/sessions`
-  and `/session` answer that link as `webUrl` (null otherwise). In the
-  Electron app it opens in the default browser.
-- **Search** (`/` to focus): case-insensitive substring scan. With **All
-  projects** it covers every `.jsonl` under the search dirs and local projects
-  (in the Electron app, `~/.claude/projects/`); with one project, only that project.
-  Clicking a hit opens the session scrolled to that line.
+  sessions; `/sessions` and `/session` answer that link as `webUrl`) or, once
+  decrypted, one of its lines has a `remote_session_id`. In the Electron app it
+  opens in the default browser.
+- **Search** (`/` to focus): case-insensitive substring scan. Encrypted
+  projects are searched in the browser, over the decrypted sessions of the
+  unlocked projects in scope (fetched once and cached until they grow): the
+  server only holds ciphertext and cannot search them. Local projects are
+  searched by the local server (`GET /search`). Clicking a hit opens the
+  session scrolled to that line.
 
-Port, data directory, search directories and local projects are set in `CONFIG` at the top of
+Port, data directory and local projects are set in `CONFIG` at the top of
 `main.js`.
 
 ## Server (headless)
 
 `npm run serve` runs [`server.js`](server.js): the same server and UI as the
 app, without Electron. It is configured by environment: `PORT` (9999), `HOST`
-(0.0.0.0), `SCRY_DATA_DIR` (`~/.jsonl-sessions`), `SCRY_SEARCH_DIRS` (extra
-`:`-separated dirs), and `SCRY_USER`/`SCRY_PASS` (basic auth for `/app`,
-`/search`, `/projects`, `/sessions` and `/session`, and for creating projects).
-The JSON API: `GET /search?q=[&project=]`, `GET /projects`,
-`POST /projects {"name"}` (answers the new token), `POST /projects/token
-{"name"}` (replaces it), `GET /sessions[?project=]`,
-`GET /session?project=&id=` — `project` absent means all projects, present and
-empty means the legacy files with no project. `GET /healthz`, `GET /plugin`, the
-landing page at `/` and the favicons are always open.
+(0.0.0.0), `SCRY_DATA_DIR` (`~/.jsonl-sessions`), and `SCRY_USER`/`SCRY_PASS`
+(basic auth for `/app`, `/projects`, `/sessions` and `/session`, and for
+creating projects; an outer lock, not what keeps sessions private). The JSON
+API: `GET /projects`, `POST /projects {"name","authKey","wrappedKey"}`,
+`POST /projects/token {"name","authKey","wrappedKey"}` (with the current auth
+key in `X-Scry-Key`), `GET /sessions?project=` (each with its first encrypted
+lines in `head`) and `GET /session?project=&id=` (encrypted lines) — the last
+two need the project's auth key in `X-Scry-Key` (local projects need none). `GET /healthz`, `GET /version`, `GET /plugin`,
+the landing page at `/` and the favicons are always open.
 
 ## Deployment
 
@@ -177,8 +226,8 @@ new `:latest`; its header lists the secret and apply steps. Point senders at
 npm test
 ```
 
-Runs `test/smoke.js` with plain Node (no Electron needed): starts the server,
-checks that ingestion without a project is rejected, posts lines for sessions
-in two projects, checks the files, lists projects and sessions, reads a
-session, and searches across all projects, one project, and a fake
-`~/.claude/projects` directory.
+Runs `test/smoke.js` with plain Node (no Electron needed): checks the crypto
+round trips and that keys are bound to their project, that plaintext and
+foreign keys are refused, that nothing readable (sessions, tokens, keys) lands
+on disk, token replacement, `scry-crypt.js` (encrypt, decrypt, migrate), and
+the HTTP routes with basic auth and project keys.

@@ -16,9 +16,10 @@ const CONFIG = {
   PORT: 9999,
   HOST: '127.0.0.1',
   DATA_DIR: path.join(os.homedir(), '.jsonl-sessions'),
-  SEARCH_DIRS: [path.join(os.homedir(), '.jsonl-sessions')],
   // Read-only projects over local Claude Code transcripts: listed, opened and
-  // searched like ingested projects, but nothing is ingested into them.
+  // searched like ingested projects, but nothing is ingested into them. They
+  // are this machine's own plaintext files, not scry's encrypted store, so
+  // they need no token.
   LOCAL_PROJECTS: {
     'claude-code-local': path.join(os.homedir(), '.claude', 'projects'),
   },
@@ -60,7 +61,6 @@ app.whenReady().then(async () => {
       pluginDir: CONFIG.PLUGIN_DIR,
       uiFile: path.join(__dirname, 'public', 'app.html'),
       publicDir: path.join(__dirname, 'public'),
-      searchDirs: CONFIG.SEARCH_DIRS,
       localProjects: CONFIG.LOCAL_PROJECTS,
       maxResults: CONFIG.MAX_RESULTS,
       buildInfo: BUILD_INFO,
