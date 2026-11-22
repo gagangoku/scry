@@ -1,0 +1,163 @@
+# scry on the Hetzner k8s cluster (Traefik ingress).
+# Ingested sessions live on the scry-data PersistentVolumeClaim at /data.
+#
+# Build and push (CI does this on every push to master, see
+# .github/workflows/docker.yaml):
+#   docker build --platform linux/amd64 -t teltrix/scry:latest .
+#   docker push teltrix/scry:latest
+#
+# Create the app secret once (never commit real values):
+#   kubectl create secret generic scry-env \
+#     --from-literal=SCRY_INGEST_TOKEN=... \
+#     --from-literal=SCRY_USER=... --from-literal=SCRY_PASS=...
+#
+# Only the keys listed under env: below reach the container. All three are
+# required (the pod won't start without them), so /ingest and the search UI are
+# never served without auth. GET /plugin and /healthz stay unauthenticated.
+#
+# Deploy / update:
+#   kubectl apply -f deploy/hetzner.yaml
+#   (Keel rolls out each new :latest pushed by CI)
+#
+# Senders (claude-chat-logger) then use:
+#   SCRY_INGEST_URL=https://scry.teltrix.ai/ingest
+#   SCRY_INGEST_TOKEN=<same token>
+# and cloud setup scripts download the plugin from https://scry.teltrix.ai/plugin.
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: scry-data
+  labels:
+    app: scry
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: scry
+  labels:
+    app: scry
+  annotations:
+    # Keel redeploys when the digest behind :latest changes (CI pushes on master).
+    keel.sh/policy: force
+    keel.sh/match-tag: "true"
+    keel.sh/trigger: poll
+    keel.sh/pollSchedule: "@every 30s"
+spec:
+  replicas: 1
+  # The volume is ReadWriteOnce and session files are appended from one
+  # process: never run two pods at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: scry
+  template:
+    metadata:
+      labels:
+        app: scry
+    spec:
+      imagePullSecrets:
+        - name: docker-secret
+      securityContext:
+        fsGroup: 65532
+      containers:
+        - name: scry
+          image: teltrix/scry:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 9999
+          env:
+            - name: SCRY_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: scry-env
+                  key: SCRY_INGEST_TOKEN
+            - name: SCRY_USER
+              valueFrom:
+                secretKeyRef:
+                  name: scry-env
+                  key: SCRY_USER
+            - name: SCRY_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: scry-env
+                  key: SCRY_PASS
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: scry-data
+        - name: tmp
+          emptyDir: {}
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: scry
+  labels:
+    app: scry
+spec:
+  selector:
+    app: scry
+  ports:
+    - name: http
+      port: 9999
+      targetPort: http
+---
+kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: scry-ingress
+spec:
+  tls:
+    - hosts:
+        - scry.teltrix.ai
+      secretName: secret-teltrix-20260310
+  ingressClassName: traefik
+  rules:
+    - host: scry.teltrix.ai
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: scry
+                port:
+                  number: 9999

@@ -98,6 +98,36 @@ function post(port, body, headers = {}) {
   assert.ok(fs.existsSync(path.join(authDir, 's3.jsonl')));
 
   authServer.close();
+
+  // Web UI, /search, /healthz and basic auth
+  const uiFile = path.join(tmp, 'ui.html');
+  fs.writeFileSync(uiFile, '<p>scry ui</p>');
+  const uiServer = await createIngestServer({
+    dataDir, port: 0, uiFile, searchDirs: [dataDir], uiUser: 'u', uiPass: 'p',
+  });
+  const uiPort = uiServer.address().port;
+  const get = (p, headers = {}) => new Promise((resolve, reject) => {
+    http.get({ host: '127.0.0.1', port: uiPort, path: p, headers }, (r) => {
+      let data = '';
+      r.on('data', (c) => (data += c));
+      r.on('end', () => resolve({ status: r.statusCode, headers: r.headers, data }));
+    }).on('error', reject);
+  });
+  const basic = (u, p) => ({ authorization: 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64') });
+
+  assert.strictEqual((await get('/healthz')).status, 200);
+  let r = await get('/');
+  assert.strictEqual(r.status, 401);
+  assert.match(r.headers['www-authenticate'], /^Basic/);
+  assert.strictEqual((await get('/search?q=alpha', basic('u', 'wrong'))).status, 401);
+  r = await get('/', basic('u', 'p'));
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.data, '<p>scry ui</p>');
+  r = await get('/search?q=alpha', basic('u', 'p'));
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(JSON.parse(r.data).length, 3);
+  uiServer.close();
+
   server.close();
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log('smoke test passed');

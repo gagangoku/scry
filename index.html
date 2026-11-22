@@ -26,15 +26,34 @@
     const meta = document.getElementById('meta');
     const results = document.getElementById('results');
 
-    window.api.config().then((cfg) => {
-      meta.textContent = `Ingest: POST JSONL to http://${cfg.HOST}:${cfg.PORT}/ingest — searching: ${cfg.SEARCH_DIRS.join(', ')}`;
+    // In Electron, preload.js exposes window.api; in a browser (server.js),
+    // the same calls go over HTTP to the page's own origin.
+    const api = window.api || {
+      config: async () => null,
+      search: async (query) => {
+        const res = await fetch('search?q=' + encodeURIComponent(query));
+        if (!res.ok) throw new Error(`search failed: HTTP ${res.status}`);
+        return res.json();
+      },
+    };
+
+    api.config().then((cfg) => {
+      meta.textContent = cfg
+        ? `Ingest: POST JSONL to http://${cfg.HOST}:${cfg.PORT}/ingest — searching: ${cfg.SEARCH_DIRS.join(', ')}`
+        : `Ingest: POST JSONL to ${new URL('ingest', location.href)}`;
     });
 
     async function run() {
       const query = q.value.trim();
       if (!query) return;
       results.textContent = 'Searching…';
-      const hits = await window.api.search(query);
+      let hits;
+      try {
+        hits = await api.search(query);
+      } catch (err) {
+        results.textContent = err.message;
+        return;
+      }
       results.innerHTML = '';
       meta.textContent = `${hits.length} result(s)`;
       for (const h of hits) {
