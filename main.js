@@ -14,7 +14,9 @@ const BUILD_INFO = {
 // All configuration lives here.
 const CONFIG = {
   PORT: 9999,
-  HOST: '127.0.0.1',
+  // Every network address, so Claude running elsewhere (e.g. a cloud session)
+  // can reach /ingest at this machine's public IP.
+  HOST: '0.0.0.0',
   DATA_DIR: path.join(os.homedir(), '.jsonl-sessions'),
   SEARCH_DIRS: [path.join(os.homedir(), '.jsonl-sessions')],
   // Read-only projects over local Claude Code transcripts: listed, opened and
@@ -30,8 +32,10 @@ const CONFIG = {
 // The window is a browser on the app's own server, so the desktop app and the
 // headless server (server.js) run the same UI and the same API: everything in
 // one is in the other, and http://127.0.0.1:9999/app works in any browser while
-// the app runs. The server listens on localhost only, without basic auth.
-const UI_URL = `http://${CONFIG.HOST}:${CONFIG.PORT}/app`;
+// the app runs. The server listens on every network address, without basic
+// auth: /ingest needs a project's bearer token, but the UI routes are open to
+// anyone who can reach the port. The window itself always uses loopback.
+const UI_URL = `http://127.0.0.1:${CONFIG.PORT}/app`;
 
 function createWindow() {
   const win = new BrowserWindow({ width: 1200, height: 800 });

@@ -14,7 +14,10 @@ npm start
 The app window is a browser on the app's own local server, so the desktop app
 and the headless server run the same UI and API: everything works in both, and
 while the app runs, `http://127.0.0.1:9999/app` opens the same UI in any browser.
-That server listens on localhost only, without basic auth. Only one of the app
+That server listens on every network address (`0.0.0.0`), so Claude running
+elsewhere can reach `/ingest`, which needs a project's token. The UI and its
+API have no basic auth in the app, so anyone who can reach port 9999 can read
+your sessions: keep the port firewalled to the hosts that need it. Only one of the app
 and `npm run serve` can hold port 9999 at a time; the app shows an error and
 quits if the port is taken.
 
