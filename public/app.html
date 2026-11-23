@@ -456,7 +456,14 @@
 
     // ---------- project dialog ----------
     const dlg = $('dlg');
-    const ingestUrl = new URL('ingest', location.href).href;
+    // Claude runs elsewhere (e.g. a cloud session) and cannot reach this
+    // machine's loopback address, so on a local server the copied URL names a
+    // placeholder for scry's public IP instead of 127.0.0.1.
+    const ingestUrl = (() => {
+      const u = new URL('ingest', location.href);
+      if (['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname)) u.hostname = 'scry_public_ip';
+      return u.href;
+    })();
 
     async function copyButton(text, label = 'Copy') {
       const b = el('button', {

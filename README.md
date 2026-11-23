@@ -46,7 +46,8 @@ It does not install itself:
    xattr -dr com.apple.quarantine /Applications/Scry.app
    ```
 
-3. Point the plugin at `http://127.0.0.1:9999/ingest` with a project's token.
+3. Point the plugin at `http://scry_public_ip:9999/ingest` with a project's token,
+   where `scry_public_ip` is an address of this machine that Claude can reach.
 
 Notarizing (so step 2 goes away) needs an Apple Developer ID certificate and
 electron-builder's `CSC_LINK`/`APPLE_ID` secrets in the workflow, in place of
@@ -55,7 +56,7 @@ electron-builder's `CSC_LINK`/`APPLE_ID` secrets in the workflow, in place of
 
 ## Ingest
 
-POST JSONL lines to `http://127.0.0.1:9999/ingest` with a project's token
+POST JSONL lines to `http://scry_public_ip:9999/ingest` with a project's token
 (see [Projects and tokens](#projects-and-tokens)). Every line needs a
 **project**: the `X-Project` header, else a `project` field in the line. A
 request where any line has no project is rejected with `400` and nothing is
@@ -68,7 +69,7 @@ written. Projects keep different Claude accounts' sessions apart (e.g. `work`,
 curl -X POST -H "Authorization: Bearer $SCRY_INGEST_TOKEN" \
   -H 'X-Project: work' -H 'X-Session-Id: my-session' \
   --data-binary $'{"msg":"hello"}\n{"msg":"world"}' \
-  http://127.0.0.1:9999/ingest
+  http://scry_public_ip:9999/ingest
 ```
 
 ### Projects and tokens
