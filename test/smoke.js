@@ -141,6 +141,30 @@ function post(port, body, headers = {}) {
   assert.strictEqual(web['uuid-1'], 'https://claude.ai/code/session_01Xyz');
   assert.strictEqual(web['uuid-2'], null);
 
+  // Git repos: from the plugin's `repos` field (validated), and for local
+  // transcripts from <cwd>/.git/config's origin plus the line's gitBranch
+  fs.writeFileSync(path.join(webDir, 'w', 'session_01Repo.jsonl'),
+    '{"kind":"prompt","prompt":"r","repos":[{"name":"acme/app","url":"https://github.com/acme/app","branch":"claude/x"},'
+    + '{"name":"../evil","url":"https://x"},{"name":"acme/lib","url":"javascript:alert(1)"}]}\n');
+  const repos = Object.fromEntries(listSessions({ dataDir: webDir, project: 'w' }).map((x) => [x.id, x.repos]));
+  assert.deepStrictEqual(repos['session_01Repo'], [
+    { name: 'acme/app', url: 'https://github.com/acme/app', branch: 'claude/x' },
+    { name: 'acme/lib', url: 'https://github.com/acme/lib' },
+  ]);
+  assert.deepStrictEqual(repos['session_01Abc'], []);
+  const checkout = path.join(tmp, 'checkout');
+  fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(checkout, '.git', 'config'),
+    '[core]\n\tbare = false\n[remote "origin"]\n\turl = git@github.com:acme/tool.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n');
+  const repoLocal = path.join(tmp, 'repo-local');
+  fs.mkdirSync(path.join(repoLocal, 'p'), { recursive: true });
+  fs.writeFileSync(path.join(repoLocal, 'p', 's1.jsonl'),
+    JSON.stringify({ type: 'user', cwd: checkout, gitBranch: 'main', message: { role: 'user', content: 'hi' } }) + '\n');
+  const rl = listSessions({ dataDir: webDir, project: 'loc', localProjects: { loc: repoLocal } });
+  assert.deepStrictEqual(rl[0].repos, [{ name: 'acme/tool', url: 'https://github.com/acme/tool', branch: 'main' }]);
+  const rs = await readSession({ dataDir: webDir, project: 'loc', id: 's1', localProjects: { loc: repoLocal } });
+  assert.strictEqual(rs.repos[0].name, 'acme/tool');
+
   // Search across both the ingest dir and the claude projects dir
   let hits = await searchJsonl({ dirs: [dataDir, path.join(tmp, 'claude-projects')], query: 'alpha', dataDir });
   assert.strictEqual(hits.length, 4);

@@ -1,12 +1,14 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 // One JSON object per line. Two kinds:
-//   { kind: "prompt",   ts, session_id, project?, remote_session_id?, prompt }
-//   { kind: "response", ts, session_id, project?, remote_session_id?, turn_id, reason, response, thinking? }
+//   { kind: "prompt",   ts, session_id, project?, remote_session_id?, repos?, prompt }
+//   { kind: "response", ts, session_id, project?, remote_session_id?, repos?, turn_id, reason, response, thinking? }
 // Prompts are logged when submitted, responses when the turn ends (any reason,
 // aborted and errored included), so a long or interrupted turn never loses the
 // prompt. remote_session_id is the claude.ai/code session id (session_01...),
 // resolved best-effort in cloud sessions; it is also the scry session key.
+// repos is the git repositories the session works on,
+// [{ name: "owner/repo", url: "https://github.com/owner/repo", branch? }].
 const LOG = '$HOME/.claude/chat-log.jsonl'
 
 // HTTP ingestion is driven by three environment variables:
@@ -21,6 +23,93 @@ const LOG = '$HOME/.claude/chat-log.jsonl'
 
 // The claude.ai/code session id (session_01...), when this is a cloud session.
 let remoteSessionId = ''
+type Repo = { name: string; url: string; branch?: string }
+// The git repositories this session works on; null until resolved.
+let repos: Repo[] | null = null
+let repoTries = 0
+
+// "owner/repo" from a GitHub-style URL (https, ssh, or the git proxy's
+// http://.../git/owner/repo form), without .git; null when it has no such path.
+function repoName(url: string): string | null {
+  const m = url.trim().replace(/\.git$/, '').match(/[/:]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/)
+  return m ? `${m[1]}/${m[2]}` : null
+}
+
+// Repos from the get_session result: session_context.sources[].git_repository.url,
+// with branches from session_context.outcomes[].git_repository.git_info.
+function reposFromSession(r: unknown): Repo[] {
+  const texts: string[] = []
+  const content = (r as { content?: unknown })?.content
+  if (Array.isArray(content)) {
+    for (const c of content) if (c && typeof (c as { text?: unknown }).text === 'string') texts.push((c as { text: string }).text)
+  }
+  for (const t of texts) {
+    let o: any
+    try { o = JSON.parse(t) } catch { continue }
+    const ctx = o?.ccr?.session_context ?? o?.session_context
+    if (!ctx) continue
+    const out: Repo[] = []
+    const branches = new Map<string, string>()
+    for (const oc of Array.isArray(ctx.outcomes) ? ctx.outcomes : []) {
+      const gi = oc?.git_repository?.git_info
+      if (typeof gi?.repo === 'string' && Array.isArray(gi.branches) && typeof gi.branches[0] === 'string') {
+        branches.set(gi.repo.toLowerCase(), gi.branches[0])
+      }
+    }
+    for (const src of Array.isArray(ctx.sources) ? ctx.sources : []) {
+      const url = src?.git_repository?.url
+      if (typeof url !== 'string') continue
+      const name = repoName(url)
+      if (!name || out.some((x) => x.name === name)) continue
+      const branch = branches.get(name.toLowerCase())
+      out.push({ name, url: `https://github.com/${name}`, ...(branch ? { branch } : {}) })
+    }
+    return out
+  }
+  return []
+}
+
+// A browsable https URL for a git remote: git@host:owner/repo and
+// https://user@host/owner/repo.git map to https://host/owner/repo; the cloud
+// git proxy (http://...@127.0.0.1:port/git/owner/repo) maps to GitHub.
+function webUrlOfRemote(url: string, name: string): string {
+  const ssh = url.match(/^(?:ssh:\/\/)?[^@/]+@([^:/]+)[:/]/)
+  if (ssh) return `https://${ssh[1]}/${name}`
+  const http = url.match(/^https?:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\//)
+  if (!http || /^(127\.0\.0\.1|localhost)$/.test(http[1] ?? '')) return `https://github.com/${name}`
+  return `https://${http[1]}/${name}`
+}
+
+// Fallback outside cloud sessions (or when get_session is unavailable): the
+// origin remote and current branch of the working directory, if it is a repo.
+async function reposFromGit($: EngineInterface): Promise<Repo[]> {
+  const r = await $.process.run(
+    ['sh', '-c', 'git remote get-url origin 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null'],
+    { timeoutMs: 5000 },
+  )
+  const [url, branch] = r.stdout.split('\n').map((l) => l.trim())
+  const name = url ? repoName(url) : null
+  if (!name) return []
+  return [{ name, url: webUrlOfRemote(url ?? '', name), ...(branch && branch !== 'HEAD' ? { branch } : {}) }]
+}
+
+// Resolves once; retried on a few logs if nothing was found (the MCP server
+// may connect after session start).
+async function resolveRepos($: EngineInterface): Promise<void> {
+  if (repos !== null && (repos.length > 0 || repoTries >= 3)) return
+  repoTries++
+  let found: Repo[] = []
+  try {
+    found = reposFromSession(await $.mcp.call('claude-code-remote', 'get_session'))
+  } catch {
+    // Not a cloud session, or the server is not connected here.
+  }
+  if (found.length === 0) {
+    try { found = await reposFromGit($) } catch { /* no git */ }
+  }
+  repos = found
+}
+
 // Streamed thinking per main-loop turn, attached to that turn's response line.
 const thinkingByTurn = new Map<string, string>()
 
@@ -125,6 +214,7 @@ async function flushOutbox($: EngineInterface): Promise<void> {
 // fail the calling hook.
 async function logLine($: EngineInterface, fields: Record<string, unknown>): Promise<void> {
   await resolveRemoteSessionId($)
+  await resolveRepos($)
   const sessionId = await $.session.id()
   const project = (await $.env.get('SCRY_PROJECT'))?.trim() ?? ''
   const obj = {
@@ -132,6 +222,7 @@ async function logLine($: EngineInterface, fields: Record<string, unknown>): Pro
     session_id: sessionId,
     ...(project !== '' ? { project } : {}),
     ...(remoteSessionId !== '' ? { remote_session_id: remoteSessionId } : {}),
+    ...(repos !== null && repos.length > 0 ? { repos } : {}),
     ...fields,
   }
   const line = JSON.stringify(obj)

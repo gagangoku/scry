@@ -122,6 +122,11 @@
       background: rgba(109,140,255,.14); color: var(--accent); font-weight: 550; vertical-align: 1px;
     }
     .chip.none { background: var(--panel-2); color: var(--muted); }
+    .chip.repo { background: var(--panel-2); color: var(--muted); font-weight: 500; }
+    a.chip.repo { text-decoration: none; }
+    a.chip.repo:hover { color: var(--text); background: var(--hover); }
+    .sess .repos { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; min-width: 0; }
+    .sess .repos .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .chip.warn { background: rgba(240,163,94,.15); color: var(--warn); }
 
     #content { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -565,10 +570,34 @@
       renderList();
     }
 
+    // ---------- git repos ----------
+    // A session's repos: [{ name: 'owner/repo', url, branch? }].
+    function repoSearchText(s) {
+      return (s.repos || []).map((r) => r.name + ' ' + (r.branch || '')).join(' ');
+    }
+    // The repo's page, at the branch on GitHub.
+    function repoHref(r) {
+      if (!/^https:\/\//.test(r.url)) return null;
+      if (r.branch && /^https:\/\/github\.com\//.test(r.url)) {
+        return r.url + '/tree/' + r.branch.split('/').map(encodeURIComponent).join('/');
+      }
+      return r.url;
+    }
+    // A chip naming the repo (and branch). As a link in the session header; as
+    // plain text in the sidebar, where the whole row is a button.
+    function repoChip(r, link) {
+      const label = '⎇ ' + r.name + (r.branch ? ' @ ' + r.branch : '');
+      const title = r.url + (r.branch ? `\nBranch ${r.branch}` : '');
+      const href = link ? repoHref(r) : null;
+      return href
+        ? el('a', { className: 'chip repo mono', href, target: '_blank', rel: 'noopener noreferrer', title: title + '\nOpen the repository' }, label)
+        : el('span', { className: 'chip repo mono', title }, label);
+    }
+
     function renderList() {
       const f = filterInput.value.trim().toLowerCase();
       const shown = f
-        ? sessions.filter((s) => (s.title + ' ' + s.id + ' ' + s.project).toLowerCase().includes(f))
+        ? sessions.filter((s) => (s.title + ' ' + s.id + ' ' + s.project + ' ' + repoSearchText(s)).toLowerCase().includes(f))
         : sessions;
       $('count').textContent = sessions.length ? (f ? `${shown.length} of ${sessions.length}` : `${sessions.length}`) : '';
       listEl.innerHTML = '';
@@ -586,6 +615,7 @@
         },
           el('div', { className: 'title' }, s.title || s.id),
           el('div', { className: 'id mono' }, showProject ? [projectChip(s.project), ' '] : null, s.title ? s.id : ''),
+          (s.repos && s.repos.length) ? el('div', { className: 'repos' }, s.repos.map((r) => repoChip(r, false))) : null,
           el('div', { className: 'times' },
             el('span', {}, 'Created ', fmtShort(s.createdAt)),
             el('span', {}, 'Updated ', fmtRel(s.updatedAt)),
@@ -750,6 +780,7 @@
           el('h1', { title: s.title || s.id }, s.title || s.id),
           el('div', { className: 'sub' },
             projectChip(s.project),
+            ...(s.repos || []).map((r) => repoChip(r, true)),
             el('span', { className: 'mono' }, s.id),
             el('span', { title: fmtFull(s.createdAt) }, 'Created ', fmtFull(s.createdAt)),
             el('span', { title: fmtFull(s.updatedAt) }, 'Updated ', fmtRel(s.updatedAt)),
