@@ -10,13 +10,25 @@
 #   kubectl create secret generic scry-env \
 #     --from-literal=SCRY_USER=... --from-literal=SCRY_PASS=...
 #
-# Only the keys listed under env: below reach the container. Both are required
+# Only the keys listed under env: below reach the container from scry-env
+# (every key of scry-accounts does, see below). Both are required
 # (the pod won't start without them), so the UI is never served without auth.
 # Ingest tokens are not part of the deployment: each project gets its own,
 # created in the UI (New project / Token) and stored hashed on the volume, so
 # /ingest only accepts senders holding a project's token. GET /plugin and
 # /healthz stay unauthenticated. A SCRY_INGEST_TOKEN key left in an older
 # scry-env secret is ignored.
+#
+# Google sign-in and paid plans (optional; see README "Accounts and plans"):
+# put these keys in a second secret, scry-accounts. Without it the pod still
+# starts and runs single-tenant behind SCRY_USER/SCRY_PASS as before.
+#   kubectl create secret generic scry-accounts \
+#     --from-literal=SCRY_GOOGLE_CLIENT_ID=....apps.googleusercontent.com \
+#     --from-literal=SCRY_ADMIN_EMAILS=you@example.com \
+#     --from-literal=STRIPE_SECRET_KEY=sk_live_... \
+#     --from-literal=STRIPE_WEBHOOK_SECRET=whsec_... \
+#     --from-literal=STRIPE_PRICE_PRO=price_... \
+#     --from-literal=STRIPE_PRICE_MAX=price_...
 #
 # Deploy / update:
 #   kubectl apply -f deploy/hetzner.yaml
@@ -92,6 +104,13 @@ spec:
                 secretKeyRef:
                   name: scry-env
                   key: SCRY_PASS
+            - name: SCRY_PUBLIC_URL
+              value: https://scry.teltrix.ai
+          # Accounts and billing, all optional (see the header).
+          envFrom:
+            - secretRef:
+                name: scry-accounts
+                optional: true
           volumeMounts:
             - name: data
               mountPath: /data

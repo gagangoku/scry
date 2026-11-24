@@ -163,6 +163,9 @@ async function ingest($: EngineInterface, url: string, project: string, line: st
   const token = await $.env.get('SCRY_INGEST_TOKEN')
   if (token) headers['Authorization'] = `Bearer ${token}`
   const res = await $.http.fetch(url, { method: 'POST', headers, body: line + '\n' })
+  // 402: the scry account's storage plan is full; lines stay queued and go
+  // through once the user upgrades.
+  if (res.status === 402) throw new Error('HTTP 402: scry storage limit reached, upgrade your plan in scry (Account)')
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
 }
 

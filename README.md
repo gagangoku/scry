@@ -168,6 +168,67 @@ The JSON API: `GET /search?q=[&project=]`, `GET /projects`,
 empty means the legacy files with no project. `GET /healthz`, `GET /plugin`, the
 landing page at `/` and the favicons are always open.
 
+## Accounts and plans
+
+The hosted server can run multi-user: people sign in with Google, each user
+sees only the projects they create, and storage is metered per user against a
+plan. It turns on when `SCRY_GOOGLE_CLIENT_ID` is set; without it (and always
+in the desktop app) scry stays single-tenant as described above.
+
+| Plan | Storage | Price |
+|------|---------|-------|
+| Free | 20 MB   | $0, no card |
+| Pro  | 2 GB    | $5/month or $48/year |
+| Max  | 25 GB   | $15/month or $144/year |
+
+- **Sign-in.** `/app` shows a *Continue with Google* button (Google Identity
+  Services). The browser posts Google's ID token to `POST /auth/google`; the
+  server checks its RS256 signature against Google's published keys, the
+  audience (`SCRY_GOOGLE_CLIENT_ID`), issuer, expiry and that the email is
+  verified, creates the user on the Free plan on first sign-in, and sets a
+  30-day `HttpOnly`, `SameSite=Lax` session cookie (`Secure` behind https).
+  Users and session hashes live in `<dataDir>/.scry/accounts.json`.
+- **Ownership.** A project created by a signed-in user records them as its
+  `owner` in `projects.json`. Users see, search, read and re-token only their
+  own projects; anything else answers 404. Project names stay unique across
+  the server.
+- **Metering.** A user's usage is the size of the `.jsonl` files in all their
+  projects, computed from disk on first use and kept current on every ingest.
+  An ingest request that would take the owner past their plan's limit gets
+  `402 Payment Required` and nothing is written; data already stored stays
+  readable and searchable. The chat-logger plugin keeps those lines queued and
+  shows a toast. The header shows a usage meter, with a banner from 80%.
+  `SCRY_FREE_LIMIT_MB` changes the Free limit; plans are in
+  [`lib/accounts.js`](lib/accounts.js).
+- **Admins.** Basic auth (`SCRY_USER`/`SCRY_PASS`) and the Google accounts in
+  `SCRY_ADMIN_EMAILS` are admins: unmetered, they see the deployment's own
+  projects (created over basic auth, and pre-accounts folders), not users'
+  sessions, plus **Users & storage** (`GET /admin/users`: every user's plan and
+  usage). `POST /admin/users/plan {"email","plan"}` sets a plan by hand
+  (comped accounts, invoiced customers).
+- **Payments (Stripe).** With `STRIPE_SECRET_KEY`, the plan cards' **Upgrade**
+  opens Stripe Checkout for that plan's price (`STRIPE_PRICE_PRO`,
+  `STRIPE_PRICE_MAX`), and subscribers get **Manage billing** (the Stripe
+  Billing Portal: switch plan, change card, cancel). Point a Stripe webhook at
+  `<SCRY_PUBLIC_URL>/billing/webhook` with `checkout.session.completed`,
+  `customer.subscription.updated` and `customer.subscription.deleted`, and set
+  its signing secret as `STRIPE_WEBHOOK_SECRET`. Subscriptions that are
+  `active`, `trialing` or `past_due` keep the paid plan; cancelled or unpaid
+  ones drop to Free. Without Stripe keys the paid cards say *Coming soon*.
+
+Setup: in Google Cloud Console create an OAuth client of type *Web
+application* with `https://scry.teltrix.ai` as an authorized JavaScript
+origin, and set `SCRY_GOOGLE_CLIENT_ID`, `SCRY_ADMIN_EMAILS` and
+`SCRY_PUBLIC_URL` (see [`deploy/hetzner.yaml`](deploy/hetzner.yaml)). In
+Stripe, create a product per paid plan with a monthly price (its ID goes in
+`STRIPE_PRICE_<PLAN>`); add the yearly prices to the Billing Portal's product
+catalog so subscribers can switch to annual billing there.
+
+Routes: `GET /auth/config`, `GET /plans` (public), `POST /auth/google`,
+`POST /auth/logout`, `GET /me`, `POST /billing/checkout {"plan"}`,
+`POST /billing/portal`, `POST /billing/webhook`, `GET /admin/users`,
+`POST /admin/users/plan`.
+
 ## Deployment
 
 The `Dockerfile` packages the headless server (`node:22-alpine`, no npm
@@ -187,7 +248,10 @@ new `:latest`; its header lists the secret and apply steps. Point senders at
 npm test
 ```
 
-Runs `test/smoke.js` with plain Node (no Electron needed): starts the server,
+Runs `test/smoke.js` and `test/accounts.js` with plain Node. `test/accounts.js`
+covers Google sign-in (against a local fake key server), per-user isolation,
+quotas, admin routes and Stripe Checkout and webhooks (against a fake Stripe).
+`test/smoke.js` runs with plain Node (no Electron needed): starts the server,
 checks that ingestion without a project is rejected, posts lines for sessions
 in two projects, checks the files, lists projects and sessions, reads a
 session, and searches across all projects, one project, and a fake
