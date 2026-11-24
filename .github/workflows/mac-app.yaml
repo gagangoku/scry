@@ -27,6 +27,11 @@ jobs:
         with:
           node-version: 22
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: server/go.mod
+
       - run: npm ci
 
       - run: npm test
@@ -39,10 +44,13 @@ jobs:
             "build": "${{ github.run_number }}",
             "commit": "${{ github.sha }}",
             "ref": "${{ github.ref_name }}",
-            "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "serverUrl": "https://scry.teltrix.ai",
+            "googleClientId": "${{ secrets.GOOGLE_DESKTOP_CLIENT_ID }}",
+            "googleClientSecret": "${{ secrets.GOOGLE_DESKTOP_CLIENT_SECRET }}"
           }
           EOF
-          cat build-info.json
+          grep -v googleClientSecret build-info.json
 
       # Ad-hoc signed (mac.identity "-"), not notarized: no Apple Developer
       # account is needed, and users clear Gatekeeper once on first launch.

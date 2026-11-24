@@ -239,58 +239,40 @@
     .dlg pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; background: none; border: 0; padding: 0; flex: 1; }
     .notice { font-size: 12.5px; color: var(--warn); background: rgba(240,163,94,.1); border-radius: 8px; padding: 8px 10px; }
 
-    /* Account, storage and plans */
+    /* Cloud account: sync, storage, backup (desktop app) */
     .usage {
       display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 6px; border-radius: 999px;
-      border: 1px solid var(--border); background: var(--panel-2); cursor: pointer; color: var(--muted);
-      font-size: 12px; white-space: nowrap;
+      border: 1px solid var(--border); background: var(--panel-2); cursor: pointer; color: var(--muted); font-size: 12px; white-space: nowrap;
     }
     .usage:hover { background: var(--hover); color: var(--text); }
+    .usage.signin { padding: 6px 12px; background: var(--accent); color: #fff; border-color: transparent; font-weight: 550; }
     .who { width: 22px; height: 22px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center;
       background: var(--active); color: var(--text); font-weight: 650; font-size: 11px; object-fit: cover; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+    .dot.syncing { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+    .dot.error, .dot.signed-out { background: #ff6b6b; }
+    @keyframes pulse { 50% { opacity: .35; } }
     .meter { display: inline-block; width: 64px; height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; flex: none; }
     .meter > i { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
     .meter.warn > i { background: var(--warn); }
     .meter.full > i { background: #ff6b6b; }
     .meter.big { width: 100%; height: 8px; }
-    .usage-line { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
-    .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
-    .plan { border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; background: var(--panel-2); }
-    .plan.current { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(109,140,255,.14); }
-    .plan h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-    .plan .price { font-size: 22px; font-weight: 650; }
-    .plan .price small { font-size: 12px; color: var(--muted); font-weight: 400; }
-    .plan .limit { font-size: 13px; }
-    .plan .yearly { font-size: 11.5px; color: var(--faint); }
-    .plan .primary, .plan .icon-btn { margin-top: auto; justify-content: center; }
+    .acct-sec { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .acct-sec h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--muted); }
+    .kv b { color: var(--text); font-weight: 550; text-align: right; }
+    .acct-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .acct-row input[type=number] { width: 72px; }
     .banner {
       flex: none; display: flex; align-items: center; gap: 12px; padding: 8px 16px; font-size: 13px;
       background: rgba(240,163,94,.12); color: var(--warn); border-bottom: 1px solid var(--border);
     }
     .banner.full { background: rgba(255,107,107,.12); color: #ff8a8a; }
     .banner .primary { padding: 4px 12px; }
-    #signin {
-      position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px;
-      background: radial-gradient(1200px 600px at 50% -10%, rgba(109,140,255,.18), transparent 60%), var(--bg);
-    }
-    .signin-card {
-      width: min(420px, 100%); background: var(--panel); border: 1px solid var(--border); border-radius: 18px;
-      padding: 32px 28px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; box-shadow: var(--shadow);
-    }
-    .signin-card h1 { margin: 0; font-size: 20px; }
-    .signin-card p { margin: 0; color: var(--muted); font-size: 13.5px; }
-    .signin-card .free { font-size: 12.5px; color: var(--ok); background: rgba(79,192,141,.12); padding: 4px 12px; border-radius: 999px; }
-    #gbtn { min-height: 44px; }
-    table.users { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-    table.users th, table.users td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-    table.users th { color: var(--muted); font-weight: 550; }
-    table.users td.num, table.users th.num { text-align: right; }
-    .users-wrap { max-height: 60vh; overflow: auto; }
-    dialog.wide { width: min(760px, calc(100vw - 32px)); }
 
     @media (max-width: 760px) {
-      header { flex-wrap: wrap; }
       .usage .usage-text { display: none; }
+      header { flex-wrap: wrap; }
       .search { order: 3; flex-basis: 100%; max-width: none; }
       .hide-sm { display: none; }
       main { grid-template-columns: 1fr; }
@@ -322,7 +304,7 @@
     </label>
     <div class="spacer"></div>
     <span class="build mono hide-sm" id="build" hidden></span>
-    <button class="usage" id="account" title="Account, storage and plan" hidden></button>
+    <button class="usage" id="account" hidden></button>
     <button class="icon-btn" id="refresh" title="Refresh">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
       <span class="hide-sm">Refresh</span>
@@ -341,25 +323,13 @@
     <section id="content"></section>
   </main>
   <dialog id="dlg"></dialog>
-  <div id="signin" hidden>
-    <div class="signin-card">
-      <div class="big-orb" style="width:56px;height:56px;border-radius:50%;background:radial-gradient(circle at 35% 30%, #c9d4ff, var(--accent) 45%, var(--accent-2) 100%);box-shadow:0 0 40px rgba(109,140,255,.45)"></div>
-      <h1>Sign in to Scry</h1>
-      <p>Keep and search your Claude Code transcripts. Your projects and sessions are private to your account.</p>
-      <span class="free" id="free-note">Free up to 20 MB of sessions</span>
-      <div id="gbtn"></div>
-      <div class="error" id="signin-error" style="color:#ff7b7b;font-size:13px"></div>
-    </div>
-  </div>
 
   <script>
-    // The UI always talks HTTP to the server that served it: server.js, or the
-    // Electron app's own local server (main.js loads this page from it).
+    // The UI always talks HTTP to the Mac app's own local server (main.js
+    // loads this page from it; lib/core.js serves it).
     // `project` null means every project; '' means legacy files with no project.
     const getJson = async (p) => {
       const res = await fetch(p);
-      // With Google sign-in on, a missing or expired session shows the sign-in.
-      if (res.status === 401 && authConfig.google) showSignIn();
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     };
@@ -372,19 +342,16 @@
       return data;
     };
     // createProject / rotateToken answer { name, token, createdAt } or { error }.
+    // Signed in to the scry server (desktop app), projects and tokens live
+    // there; otherwise they are this machine's local ingest projects.
     const scry = {
       projects: () => getJson('projects'),
-      createProject: (name) => postJson('projects', { name }),
-      rotateToken: (name) => postJson('projects/token', { name }),
+      createProject: (name) => postJson(cloudOn() ? 'cloud/create-project' : 'projects', { name }),
+      rotateToken: (name) => postJson(cloudOn() ? 'cloud/token' : 'projects/token', { name }),
       sessions: (project) => getJson('sessions?' + projParam(project)),
       session: (project, id) => getJson(`session?${projParam(project)}&id=${encodeURIComponent(id)}`),
       search: (query, project) => getJson(`search?q=${encodeURIComponent(query)}&${projParam(project)}`),
     };
-
-    // Set by GET /auth/config: { google: clientId|null, billing, purchasable, plans }.
-    let authConfig = { google: null, billing: false, purchasable: [], plans: [] };
-    // GET /me: { accounts: false } on the desktop app / without accounts.
-    let me = null;
 
     const $ = (id) => document.getElementById(id);
     const projectSel = $('project');
@@ -511,6 +478,20 @@
     let projectsInfo = [];
     async function loadProjects(select) {
       try { projectsInfo = await scry.projects(); } catch (_) { /* keep previous */ }
+      // Server projects: listed (with their tokens) even before any session synced.
+      if (cloudOn()) {
+        try {
+          const remote = await postJson('cloud/projects', {});
+          if (Array.isArray(remote)) {
+            for (const r of remote) {
+              const localInfo = projectsInfo.find((p) => p.name === r.name);
+              if (localInfo) Object.assign(localInfo, { hasToken: r.hasToken, createdAt: r.createdAt, tokenCreatedAt: r.tokenCreatedAt, cloud: true });
+              else projectsInfo.push({ ...r, local: false, cloud: true });
+            }
+            projectsInfo.sort((x, y) => (x.local - y.local) || (x.name === '') - (y.name === '') || x.name.localeCompare(y.name));
+          }
+        } catch (_) { /* offline */ }
+      }
       const saved = store.get('scry.project');
       const prev = select || projectSel.value || saved || ALL;
       projectSel.innerHTML = '';
@@ -530,7 +511,8 @@
 
     // ---------- project dialog ----------
     const dlg = $('dlg');
-    const ingestUrl = new URL('ingest', location.href).href;
+    const localIngestUrl = new URL('ingest', location.href).href;
+    const ingestUrlFor = () => (cloudOn() ? `${cloud.serverUrl}/ingest` : localIngestUrl);
 
     async function copyButton(text, label = 'Copy') {
       const b = el('button', {
@@ -544,13 +526,14 @@
     }
 
     function openDialog(...children) {
+      delete dlg.dataset.kind;
       dlg.innerHTML = '';
       dlg.append(el('div', { className: 'dlg' }, ...children));
       if (!dlg.open) dlg.showModal();
     }
 
     async function showToken({ name, token }, fresh) {
-      const env = `SCRY_PROJECT=${name}\nSCRY_INGEST_URL=${ingestUrl}\nSCRY_INGEST_TOKEN=${token}`;
+      const env = `SCRY_PROJECT=${name}\nSCRY_INGEST_URL=${ingestUrlFor()}\nSCRY_INGEST_TOKEN=${token}`;
       openDialog(
         el('h2', {}, fresh ? `Project “${name}” created` : `New token for “${name}”`),
         el('div', { className: 'notice' }, 'Copy this token now. scry stores only a hash of it and cannot show it again.'),
@@ -693,168 +676,187 @@
       }
     }
 
-    // ---------- account, storage and plans ----------
+    // ---------- cloud: account, sync, storage, backup ----------
+    // GET /cloud/status, only in the desktop app (null elsewhere).
+    let cloud = null;
+    const cloudOn = () => Boolean(cloud && cloud.signedIn);
     function fmtBytes(n) {
-      if (n === null || n === undefined) return '∞';
-      if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(n >= 10 * 1024 ** 3 ? 0 : 1).replace(/\.0$/, '')} GB`;
-      if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(n >= 10 * 1024 ** 2 ? 0 : 1).replace(/\.0$/, '')} MB`;
+      if (n === null || n === undefined) return 'Unlimited';
+      const f = (x, u) => `${x.toFixed(x >= 10 ? 0 : 1).replace(/\.0$/, '')} ${u}`;
+      if (n >= 1024 ** 3) return f(n / 1024 ** 3, 'GB');
+      if (n >= 1024 ** 2) return f(n / 1024 ** 2, 'MB');
       return `${Math.ceil(n / 1024)} KB`;
     }
-    const usagePct = (u) => (u.limitBytes ? Math.min(100, (u.usedBytes / u.limitBytes) * 100) : 0);
-    function meter(u, big) {
-      const pct = usagePct(u);
-      return el('span', { className: 'meter' + (big ? ' big' : '') + (pct >= 100 ? ' full' : pct >= 80 ? ' warn' : '') },
-        el('i', { style: `width:${Math.max(pct, u.usedBytes ? 2 : 0)}%` }));
+    const pct = (used, limit) => (limit ? Math.min(100, (used / limit) * 100) : 0);
+    function meter(used, limit, big) {
+      const p = pct(used, limit);
+      return el('span', { className: 'meter' + (big ? ' big' : '') + (p >= 100 ? ' full' : p >= 80 ? ' warn' : '') },
+        el('i', { style: `width:${Math.max(p, used ? 2 : 0)}%` }));
     }
-    function avatar(u) {
-      if (u.picture) return el('img', { className: 'who', src: u.picture, alt: '', referrerPolicy: 'no-referrer' });
-      return el('span', { className: 'who' }, (u.name || u.email || '?').trim()[0].toUpperCase());
+    function avatar(a) {
+      if (a.picture) return el('img', { className: 'who', src: a.picture, alt: '', referrerPolicy: 'no-referrer' });
+      return el('span', { className: 'who' }, (a.name || a.email || '?').trim()[0].toUpperCase());
+    }
+    const syncLabel = (s) => ({
+      idle: s.lastSyncAt ? `Up to date · ${fmtRel(s.lastSyncAt)}` : 'Waiting for the first sync',
+      syncing: 'Syncing…',
+      error: `Sync failed, retrying: ${s.error}`,
+      'signed-out': 'Signed out by the server: sign in again',
+    }[s.state] || s.state);
+
+    // rerender: refresh an open account dialog too (after an action, not on
+    // the timer, which would reset what the user is typing).
+    async function loadCloud(rerender = false) {
+      try {
+        const res = await fetch('cloud/status');
+        cloud = res.ok ? await res.json() : null;
+      } catch (_) { cloud = null; }
+      renderCloud();
+      if (rerender && dlg.open && dlg.dataset.kind === 'account') accountDialog();
     }
 
-    function showSignIn() {
-      const box = $('signin');
-      if (!box.hidden) return;
-      box.hidden = false;
-      const free = authConfig.plans.find((p) => p.id === 'free');
-      if (free) $('free-note').textContent = `Free up to ${fmtBytes(free.limitBytes)} of sessions`;
-      const s = document.createElement('script');
-      s.src = 'https://accounts.google.com/gsi/client';
-      s.async = true;
-      s.onerror = () => { $('signin-error').textContent = 'Could not load Google sign-in. Check your connection or ad blocker.'; };
-      s.onload = () => {
-        google.accounts.id.initialize({
-          client_id: authConfig.google,
-          callback: async ({ credential }) => {
-            $('signin-error').textContent = '';
-            const r = await postJson('auth/google', { credential });
-            if (r.error) { $('signin-error').textContent = r.error; return; }
-            location.reload();
-          },
-        });
-        google.accounts.id.renderButton($('gbtn'), { theme: 'filled_blue', size: 'large', shape: 'pill', text: 'continue_with', logo_alignment: 'left' });
-        google.accounts.id.prompt();
-      };
-      document.head.append(s);
+    async function cloudAction(name, body = {}) {
+      return postJson(`cloud/${name}`, body);
     }
 
-    async function loadMe() {
-      try { me = await getJson('me'); } catch (_) { me = null; }
-      renderAccount();
+    async function signIn() {
+      const r = await cloudAction('signin');
+      if (r.error) { alert(`Sign-in failed: ${r.error}`); return; }
+      cloud = r;
+      renderCloud();
+      await loadProjects();
+      await loadSessions();
+      route();
     }
 
-    function renderAccount() {
+    function renderCloud() {
       const b = $('account');
       const banner = $('banner');
       banner.hidden = true;
-      if (!me || !me.accounts) { b.hidden = true; return; }
-      b.innerHTML = '';
+      if (!cloud || !cloud.configured) { b.hidden = true; return; }
       b.hidden = false;
-      if (!me.email) {
-        b.append(el('span', { className: 'usage-text' }, 'Admin'));
+      b.innerHTML = '';
+      if (!cloud.signedIn) {
+        b.className = 'usage signin';
+        b.append(cloud.needsSignIn ? 'Sign in again' : 'Sign in to sync');
+        b.title = 'Sign in with Google to sync sessions from the scry server and back them up to Google Drive';
+        b.onclick = signIn;
         return;
       }
-      b.append(avatar(me));
-      if (me.limitBytes) b.append(meter(me));
-      b.append(el('span', { className: 'usage-text' }, me.limitBytes ? `${fmtBytes(me.usedBytes)} / ${fmtBytes(me.limitBytes)}` : me.planName));
-      b.title = `${me.email}\n${me.planName} plan · ${fmtBytes(me.usedBytes)} of ${fmtBytes(me.limitBytes)} used`;
-      const pct = usagePct(me);
-      if (me.limitBytes && pct >= 80) {
-        const full = me.usedBytes >= me.limitBytes;
+      b.className = 'usage';
+      b.onclick = accountDialog;
+      const me = cloud.me || {};
+      b.append(avatar(cloud.account), el('span', { className: 'dot ' + cloud.sync.state }));
+      if (me.allowanceBytes) b.append(meter(me.usedBytes, me.allowanceBytes));
+      b.append(el('span', { className: 'usage-text' }, me.allowanceBytes ? `${fmtBytes(me.usedBytes)} / ${fmtBytes(me.allowanceBytes)}` : cloud.account.email));
+      b.title = `${cloud.account.email}\n${syncLabel(cloud.sync)}`;
+
+      let msg = null;
+      let full = false;
+      if (me.allowanceBytes && me.usedBytes >= me.allowanceBytes) {
+        full = true;
+        msg = `Storage full (${fmtBytes(me.usedBytes)} of ${fmtBytes(me.allowanceBytes)}): new sessions are refused until you add storage.`;
+      } else if (me.allowanceBytes && pct(me.usedBytes, me.allowanceBytes) >= 80) {
+        msg = `You have used ${Math.floor(pct(me.usedBytes, me.allowanceBytes))}% of your ${fmtBytes(me.allowanceBytes)}.`;
+      } else if (cloud.sync.state === 'error') {
+        msg = syncLabel(cloud.sync);
+      }
+      if (msg) {
         banner.className = 'banner' + (full ? ' full' : '');
-        banner.innerHTML = '';
-        banner.append(
-          el('span', {}, full
-            ? `Storage full (${fmtBytes(me.usedBytes)} of ${fmtBytes(me.limitBytes)}): new transcripts are not being saved.`
-            : `You have used ${Math.floor(pct)}% of your ${fmtBytes(me.limitBytes)} on the ${me.planName} plan.`),
-          el('button', { className: 'primary', type: 'button', onclick: accountDialog }, 'Upgrade'),
-        );
+        banner.replaceChildren(el('span', {}, msg), el('button', { className: 'primary', type: 'button', onclick: accountDialog }, full ? 'Add storage' : 'Details'));
         banner.hidden = false;
       }
     }
 
-    async function startBilling(path, body) {
-      const r = await postJson(path, body);
-      if (r.error) return r.error;
-      location.href = r.url;
-      return null;
-    }
-
-    function planCard(p, err) {
-      const current = me.plan === p.id;
-      const buyable = authConfig.billing && authConfig.purchasable.includes(p.id);
-      let action = null;
-      if (current) action = el('button', { className: 'icon-btn', type: 'button', disabled: true }, 'Current plan');
-      else if (p.id === 'free') action = me.subscribed ? el('button', { className: 'icon-btn', type: 'button', onclick: async () => { err.textContent = (await startBilling('billing/portal', {})) || ''; } }, 'Downgrade') : null;
-      else if (me.subscribed) action = el('button', { className: 'primary', type: 'button', onclick: async () => { err.textContent = (await startBilling('billing/portal', {})) || ''; } }, 'Switch');
-      else if (buyable) action = el('button', { className: 'primary', type: 'button', onclick: async (e) => { e.target.disabled = true; err.textContent = (await startBilling('billing/checkout', { plan: p.id })) || ''; e.target.disabled = false; } }, `Upgrade to ${p.name}`);
-      else action = el('button', { className: 'icon-btn', type: 'button', disabled: true, title: 'Payments are not set up on this server yet' }, 'Coming soon');
-      return el('div', { className: 'plan' + (current ? ' current' : '') },
-        el('h3', {}, p.name),
-        el('div', { className: 'price' }, p.monthlyUsd ? `$${p.monthlyUsd}` : '$0', el('small', {}, p.monthlyUsd ? ' / month' : ' forever')),
-        el('div', { className: 'limit' }, `${fmtBytes(p.limitBytes)} of sessions`),
-        el('div', { className: 'yearly' }, p.yearlyUsd ? `or $${p.yearlyUsd}/year (2 months free)` : 'No card needed'),
-        action,
-      );
-    }
-
+    // The last action's error, shown when the dialog re-renders.
+    let accountError = '';
     function accountDialog() {
-      if (!me || !me.accounts) return;
-      const err = el('div', { className: 'error' });
-      const children = [];
-      if (me.email) {
-        children.push(
-          el('div', { style: 'display:flex;gap:12px;align-items:center' }, avatar(me),
-            el('div', {}, el('h2', {}, me.name || me.email), el('p', {}, `${me.email} · ${me.planName} plan`))),
-          el('div', { className: 'usage-line' },
-            el('span', {}, 'Session storage'),
-            el('span', { className: 'mono' }, `${fmtBytes(me.usedBytes)} of ${fmtBytes(me.limitBytes)}`)),
-          me.limitBytes ? meter(me, true) : el('p', {}, 'Admins are not metered.'),
-          el('p', {}, 'Storage is the size of the transcripts in all your projects. Past the limit, scry stops saving new lines (it keeps and shows everything already saved) until you upgrade.'),
-          el('div', { className: 'plans' }, authConfig.plans.map((p) => planCard(p, err))),
-          err,
-        );
-      } else {
-        children.push(el('h2', {}, 'Admin'), el('p', {}, 'Signed in with the server’s admin password.'));
-      }
-      children.push(el('div', { className: 'actions' },
-        me.admin ? el('button', { className: 'icon-btn', type: 'button', onclick: usersDialog }, 'Users & storage') : null,
-        me.subscribed ? el('button', { className: 'icon-btn', type: 'button', onclick: async () => { err.textContent = (await startBilling('billing/portal', {})) || ''; } }, 'Manage billing') : null,
-        me.email ? el('button', { className: 'icon-btn', type: 'button', onclick: signOut }, 'Sign out') : null,
-        el('button', { className: 'primary', type: 'button', onclick: () => dlg.close() }, 'Done'),
-      ));
-      dlg.classList.remove('wide');
-      openDialog(...children);
-    }
+      if (!cloudOn()) return;
+      const me = cloud.me || {};
+      const p = me.pricing || { pricePerGbUsd: 10 };
+      const err = el('div', { className: 'error' }, accountError);
+      accountError = '';
+      const busy = (btn, fn) => async () => {
+        btn.disabled = true;
+        const r = await fn();
+        btn.disabled = false;
+        accountError = (r && r.error) || '';
+        await loadCloud(true);
+        return r;
+      };
 
-    async function usersDialog() {
-      let users;
-      try { users = await getJson('admin/users'); } catch (e) { users = []; }
-      const total = users.reduce((n, u) => n + u.usedBytes, 0);
-      const paying = users.filter((u) => u.plan !== 'free').length;
-      dlg.classList.add('wide');
+      const gb = el('input', { type: 'number', min: 1, max: 100, value: 1 });
+      const buy = el('button', { className: 'primary', type: 'button' });
+      const price = () => { buy.textContent = `Buy ${Math.max(1, Number(gb.value) || 1)} GB · $${Math.max(1, Number(gb.value) || 1) * p.pricePerGbUsd}`; };
+      gb.oninput = price;
+      price();
+      buy.onclick = busy(buy, () => cloudAction('checkout', { gb: Number(gb.value) }));
+
+      const syncBtn = el('button', { className: 'icon-btn', type: 'button' }, 'Sync now');
+      syncBtn.onclick = busy(syncBtn, () => cloudAction('sync'));
+      const backupBtn = el('button', { className: 'icon-btn', type: 'button' }, 'Back up now');
+      backupBtn.onclick = busy(backupBtn, async () => {
+        backupBtn.textContent = 'Backing up…';
+        const r = await cloudAction('backup');
+        backupBtn.textContent = 'Back up now';
+        return r;
+      });
+      const restoreBtn = el('button', { className: 'icon-btn', type: 'button' }, 'Restore');
+      restoreBtn.onclick = async () => {
+        if (!confirm('Restore sessions from your Google Drive backup? Sessions missing on this Mac come back; newer local copies are kept.')) return;
+        const r = await busy(restoreBtn, () => cloudAction('restore'))();
+        if (r && r.result) {
+          alert(`Restored ${r.result.restored} sessions (${r.result.kept} already up to date).`);
+          await loadProjects();
+          await loadSessions();
+        }
+      };
+      const freq = el('select', { onchange: () => cloudAction('settings', { backupFrequency: freq.value }).then(() => loadCloud()) },
+        ['daily', 'weekly', 'off'].map((f) => el('option', { value: f, selected: cloud.backup.frequency === f }, f === 'off' ? 'Off' : f[0].toUpperCase() + f.slice(1))));
+      const bk = cloud.backup;
+
       openDialog(
-        el('h2', {}, 'Users & storage'),
-        el('p', {}, `${users.length} users · ${paying} on paid plans · ${fmtBytes(total)} stored`),
-        el('div', { className: 'users-wrap' }, el('table', { className: 'users' },
-          el('thead', {}, el('tr', {}, ['User', 'Plan', 'Used', 'Limit', '', 'Last sign-in'].map((h, i) => el('th', { className: i === 2 || i === 3 ? 'num' : '' }, h)))),
-          el('tbody', {}, users.map((u) => el('tr', {},
-            el('td', { title: u.name || '' }, u.email),
-            el('td', {}, u.planName + (u.subscribed ? ' ·  paid' : '')),
-            el('td', { className: 'num mono' }, fmtBytes(u.usedBytes)),
-            el('td', { className: 'num mono' }, fmtBytes(u.limitBytes)),
-            el('td', {}, u.limitBytes ? meter(u) : ''),
-            el('td', {}, u.lastLoginAt ? fmtRel(u.lastLoginAt) : ''),
-          ))),
-        )),
+        el('div', { style: 'display:flex;gap:12px;align-items:center' }, avatar(cloud.account),
+          el('div', {}, el('h2', {}, cloud.account.name || cloud.account.email), el('p', {}, cloud.account.email))),
+        el('div', { className: 'acct-sec' },
+          el('h3', {}, 'Storage'),
+          el('div', { className: 'kv' }, el('span', {}, 'Synced'), el('b', { className: 'mono' }, `${fmtBytes(me.usedBytes)} of ${fmtBytes(me.allowanceBytes)}`)),
+          me.allowanceBytes ? meter(me.usedBytes, me.allowanceBytes, true) : null,
+          el('p', {}, me.admin
+            ? 'Admins are not metered.'
+            : `The first ${fmtBytes(me.freeBytes)} are free. More storage is $${p.pricePerGbUsd} per GB, paid once, never expires.`),
+          me.admin || !me.billing ? null : el('div', { className: 'acct-row' }, gb, el('span', { style: 'color:var(--muted)' }, 'GB'), buy),
+        ),
+        el('div', { className: 'acct-sec' },
+          el('h3', {}, 'Sync'),
+          el('div', { className: 'kv' }, el('span', {}, 'Status'), el('b', {}, syncLabel(cloud.sync))),
+          el('div', { className: 'kv' }, el('span', {}, 'Waiting on the server'), el('b', { className: 'mono' }, `${fmtBytes(me.pendingBytes || 0)} of ${fmtBytes(me.pendingLimitBytes)}`)),
+          el('p', {}, 'New sessions reach the server, sync here within seconds, and are then deleted from the server. Scry keeps syncing while it runs, also with the window closed.'),
+          el('div', { className: 'acct-row' }, syncBtn),
+        ),
+        el('div', { className: 'acct-sec' },
+          el('h3', {}, 'Google Drive backup'),
+          el('div', { className: 'kv' }, el('span', {}, 'Last backup'),
+            el('b', {}, bk.running ? `${bk.running === 'restore' ? 'Restoring' : 'Backing up'}…` : bk.lastBackupAt ? `${fmtRel(bk.lastBackupAt)} · ${fmtBytes(bk.lastBackupBytes)}` : 'Never')),
+          bk.error ? el('div', { className: 'error' }, bk.error) : null,
+          el('div', { className: 'kv' }, el('span', {}, 'Back up automatically'), el('div', { className: 'select-wrap' }, freq)),
+          el('p', {}, 'Backups go to a hidden app folder in your own Google Drive and count toward your Drive storage. Each backup replaces the last one.'),
+          el('div', { className: 'acct-row' }, backupBtn, restoreBtn),
+        ),
+        err,
         el('div', { className: 'actions' },
-          el('button', { className: 'icon-btn', type: 'button', onclick: accountDialog }, 'Back'),
-          el('button', { className: 'primary', type: 'button', onclick: () => dlg.close() }, 'Done')),
+          el('button', { className: 'icon-btn', type: 'button', onclick: () => cloudAction('open-account') }, 'Manage on the web'),
+          el('button', { className: 'icon-btn', type: 'button', onclick: async () => {
+            if (!confirm('Sign out? Sync and backups stop; sessions already on this Mac stay.')) return;
+            await cloudAction('signout');
+            dlg.close();
+            await loadCloud();
+            await loadProjects();
+          } }, 'Sign out'),
+          el('button', { className: 'primary', type: 'button', onclick: () => dlg.close() }, 'Done'),
+        ),
       );
-    }
-
-    async function signOut() {
-      await fetch('auth/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-      location.reload();
+      dlg.dataset.kind = 'account';
     }
 
     // ---------- routing ----------
@@ -887,6 +889,9 @@
         el('div', { className: 'big-orb' }),
         el('h3', {}, 'Pick a session'),
         el('p', {}, 'Choose a session on the left to read its full log, or search across transcripts above. Use the project menu to switch between accounts.'),
+        cloud && cloud.configured && !cloud.signedIn
+          ? el('button', { className: 'primary', type: 'button', style: 'margin-top:8px', onclick: signIn }, 'Sign in with Google to sync your sessions')
+          : null,
       ));
     }
 
@@ -1116,7 +1121,6 @@
     });
     filterInput.addEventListener('input', renderList);
     $('new-project').addEventListener('click', newProjectDialog);
-    $('account').addEventListener('click', accountDialog);
     $('token-btn').addEventListener('click', tokenDialog);
     projectSel.addEventListener('change', async () => {
       store.set('scry.project', projectSel.value);
@@ -1138,7 +1142,9 @@
     });
     window.addEventListener('popstate', route);
     // Keep the list fresh while the window is visible.
-    setInterval(() => { if (!document.hidden) { loadSessions(); if (me && me.accounts) loadMe(); } }, 20000);
+    setInterval(() => { if (!document.hidden) loadSessions(); }, 20000);
+    // Sync state changes often; new synced sessions show on the next list refresh.
+    setInterval(() => { if (!document.hidden && cloud) loadCloud(); }, 5000);
 
     // Version and build of the app or server that served this page, in the
     // header, with the full details on hover.
@@ -1157,20 +1163,7 @@
     }).catch(() => { /* older server without /version */ });
 
     (async () => {
-      try { authConfig = await getJson('auth/config'); } catch (_) { /* older server */ }
-      await loadMe();
-      if (authConfig.google && !me) return; // the sign-in is showing
-      // Back from Stripe Checkout / the Billing Portal, or the 402 message's #billing link.
-      const qs = new URLSearchParams(location.search);
-      if (qs.has('billing')) {
-        history.replaceState(null, '', location.pathname + location.hash);
-        // The webhook may land a moment after the redirect.
-        if (qs.get('billing') === 'success') setTimeout(loadMe, 2500);
-        accountDialog();
-      } else if (location.hash === '#billing') {
-        history.replaceState(null, '', location.pathname);
-        accountDialog();
-      }
+      await loadCloud();
       await loadProjects();
       await loadSessions();
       route();

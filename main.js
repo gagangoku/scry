@@ -1,8 +1,11 @@
-const { app, BrowserWindow, dialog, shell } = require('electron');
+const { app, BrowserWindow, dialog, shell, safeStorage } = require('electron');
 const path = require('path');
 const os = require('os');
 const { createIngestServer } = require('./lib/core');
 const { loadBuildInfo } = require('./lib/build-info');
+const { SearchIndex } = require('./lib/index');
+const { GoogleOAuth } = require('./lib/google-oauth');
+const { Cloud } = require('./lib/cloud');
 
 const BUILD_INFO = {
   ...loadBuildInfo(),
@@ -25,12 +28,39 @@ const CONFIG = {
   MAX_RESULTS: 200,
   // Served as a tar.gz at GET /plugin.
   PLUGIN_DIR: path.join(__dirname, 'claude-chat-logger'),
+  // The scry server this app syncs from, and the Google OAuth client
+  // ("Desktop app" type) used to sign in and back up to Drive. CI stamps the
+  // client into build-info.json from repository secrets; env overrides for dev.
+  SERVER_URL: process.env.SCRY_SERVER_URL || BUILD_INFO.serverUrl || 'https://scry.teltrix.ai',
+  GOOGLE_CLIENT_ID: process.env.SCRY_GOOGLE_DESKTOP_CLIENT_ID || BUILD_INFO.googleClientId || '',
+  GOOGLE_CLIENT_SECRET: process.env.SCRY_GOOGLE_DESKTOP_CLIENT_SECRET || BUILD_INFO.googleClientSecret || '',
 };
 
-// The window is a browser on the app's own server, so the desktop app and the
-// headless server (server.js) run the same UI and the same API: everything in
-// one is in the other, and http://127.0.0.1:9999/app works in any browser while
-// the app runs. The server listens on localhost only, without basic auth.
+// Device and Google tokens are encrypted with the macOS Keychain-backed
+// safeStorage; where it is unavailable (unsigned dev builds on Linux) they
+// are stored as-is, marked so.
+const secrets = {
+  encrypt: (s) => {
+    if (!s) return s;
+    return safeStorage.isEncryptionAvailable()
+      ? 'safe:' + safeStorage.encryptString(s).toString('base64')
+      : 'plain:' + s;
+  },
+  decrypt: (s) => {
+    if (!s) return s;
+    if (s.startsWith('safe:')) return safeStorage.decryptString(Buffer.from(s.slice(5), 'base64'));
+    if (s.startsWith('plain:')) return s.slice(6);
+    return null;
+  },
+};
+
+let cloud = null;
+let index = null;
+
+// The window is a browser on the app's own local server (lib/core.js), so
+// http://127.0.0.1:9999/app works in any browser while the app runs. It
+// listens on localhost only, without basic auth. The hosted scry server
+// (server/, Go) is separate: the app syncs from it.
 const UI_URL = `http://${CONFIG.HOST}:${CONFIG.PORT}/app`;
 
 function createWindow() {
@@ -52,6 +82,29 @@ app.whenReady().then(async () => {
     version: `build ${BUILD_INFO.build} · ${short} · ${BUILD_INFO.arch}`,
     credits: BUILD_INFO.builtAt ? `Built ${BUILD_INFO.builtAt}` : 'Development build',
   });
+  const appDir = app.getPath('userData');
+  // The search index covers synced sessions and Claude Code's own transcripts.
+  index = new SearchIndex({
+    file: path.join(appDir, 'search-index.json'),
+    dirs: [CONFIG.DATA_DIR, ...Object.values(CONFIG.LOCAL_PROJECTS)],
+  });
+  cloud = new Cloud({
+    serverUrl: CONFIG.SERVER_URL,
+    dataDir: CONFIG.DATA_DIR,
+    appDir,
+    secrets,
+    index,
+    deviceName: os.hostname().replace(/\.local$/, ''),
+    openUrl: (url) => shell.openExternal(url),
+    oauth: new GoogleOAuth({
+      clientId: CONFIG.GOOGLE_CLIENT_ID,
+      clientSecret: CONFIG.GOOGLE_CLIENT_SECRET,
+      openUrl: (url) => shell.openExternal(url),
+    }),
+    log: (msg) => console.log(`scry: ${msg}`),
+    // Keep syncing after login, in the background.
+    onSignIn: () => { if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: true, openAsHidden: true }); },
+  });
   try {
     await createIngestServer({
       dataDir: CONFIG.DATA_DIR,
@@ -64,12 +117,14 @@ app.whenReady().then(async () => {
       localProjects: CONFIG.LOCAL_PROJECTS,
       maxResults: CONFIG.MAX_RESULTS,
       buildInfo: BUILD_INFO,
+      index,
+      cloud,
     });
   } catch (err) {
     dialog.showErrorBox(
       'Scry could not start',
       err.code === 'EADDRINUSE'
-        ? `Port ${CONFIG.PORT} is already in use (is scry, or npm run serve, already running?).`
+        ? `Port ${CONFIG.PORT} is already in use (is Scry already running?).`
         : err.message
     );
     app.quit();
@@ -78,11 +133,24 @@ app.whenReady().then(async () => {
 
   createWindow();
 
+  // Sync in the background from launch, and index what is already on disk.
+  cloud.start();
+  index.update().catch((err) => console.error('scry: indexing failed:', err.message));
+  // Claude Code keeps writing ~/.claude/projects: keep the index current.
+  setInterval(() => index.update().catch(() => {}), 60 * 1000);
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
+// On macOS the app keeps running (and syncing) with every window closed;
+// clicking the Dock icon reopens the window.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  if (cloud) cloud.stop();
+  try { if (index) index.save(); } catch (_) { /* best effort */ }
 });

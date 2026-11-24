@@ -6,29 +6,22 @@
 #   docker build --platform linux/amd64 -t teltrix/scry:latest .
 #   docker push teltrix/scry:latest
 #
-# Create the app secret once (never commit real values):
+# Create the app secret once (never commit real values). Every key in it
+# reaches the container; SCRY_GOOGLE_CLIENT_ID is required.
 #   kubectl create secret generic scry-env \
-#     --from-literal=SCRY_USER=... --from-literal=SCRY_PASS=...
-#
-# Only the keys listed under env: below reach the container from scry-env
-# (every key of scry-accounts does, see below). Both are required
-# (the pod won't start without them), so the UI is never served without auth.
-# Ingest tokens are not part of the deployment: each project gets its own,
-# created in the UI (New project / Token) and stored hashed on the volume, so
-# /ingest only accepts senders holding a project's token. GET /plugin and
-# /healthz stay unauthenticated. A SCRY_INGEST_TOKEN key left in an older
-# scry-env secret is ignored.
-#
-# Google sign-in and paid plans (optional; see README "Accounts and plans"):
-# put these keys in a second secret, scry-accounts. Without it the pod still
-# starts and runs single-tenant behind SCRY_USER/SCRY_PASS as before.
-#   kubectl create secret generic scry-accounts \
 #     --from-literal=SCRY_GOOGLE_CLIENT_ID=....apps.googleusercontent.com \
+#     --from-literal=SCRY_GOOGLE_DESKTOP_CLIENT_ID=....apps.googleusercontent.com \
 #     --from-literal=SCRY_ADMIN_EMAILS=you@example.com \
 #     --from-literal=STRIPE_SECRET_KEY=sk_live_... \
 #     --from-literal=STRIPE_WEBHOOK_SECRET=whsec_... \
-#     --from-literal=STRIPE_PRICE_PRO=price_... \
-#     --from-literal=STRIPE_PRICE_MAX=price_...
+#     --from-literal=STRIPE_PRICE_GB=price_...
+# (to change it: kubectl delete secret scry-env, create it again, then
+#  kubectl rollout restart deployment/scry)
+#
+# The server keeps only what users' Macs have not synced yet (at most 50 MB
+# per user, deleted once synced), plus state.json, so the volume stays small.
+# Data from the old Node server (/data/<project>/*.jsonl) is not read by the
+# Go server; copy it to a Mac's ~/.jsonl-sessions/ to keep it.
 #
 # Deploy / update:
 #   kubectl apply -f deploy/hetzner.yaml
@@ -36,7 +29,7 @@
 #
 # Senders (claude-chat-logger) then use:
 #   SCRY_INGEST_URL=https://scry.teltrix.ai/ingest
-#   SCRY_PROJECT=<project created in the UI, e.g. one per Claude account>
+#   SCRY_PROJECT=<a project created at https://scry.teltrix.ai/app or in the Mac app>
 #   SCRY_INGEST_TOKEN=<that project's token, shown when it is created>
 # and cloud setup scripts download the plugin from https://scry.teltrix.ai/plugin.
 ---
@@ -94,23 +87,11 @@ spec:
             - name: http
               containerPort: 9999
           env:
-            - name: SCRY_USER
-              valueFrom:
-                secretKeyRef:
-                  name: scry-env
-                  key: SCRY_USER
-            - name: SCRY_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: scry-env
-                  key: SCRY_PASS
             - name: SCRY_PUBLIC_URL
               value: https://scry.teltrix.ai
-          # Accounts and billing, all optional (see the header).
           envFrom:
             - secretRef:
-                name: scry-accounts
-                optional: true
+                name: scry-env
           volumeMounts:
             - name: data
               mountPath: /data
@@ -118,10 +99,10 @@ spec:
               mountPath: /tmp
           resources:
             requests:
-              cpu: 50m
-              memory: 64Mi
+              cpu: 20m
+              memory: 24Mi
             limits:
-              memory: 256Mi
+              memory: 128Mi
           readinessProbe:
             httpGet:
               path: /healthz

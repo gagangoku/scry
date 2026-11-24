@@ -1,24 +1,141 @@
 # scry
 
-Electron app for macOS to scry Claude transcripts. It runs a local HTTP server that accepts JSONL lines,
-appends them to per-session files on disk, and gives a search UI over those
-files plus `~/.claude/projects/`.
+Scry records Claude Code sessions and makes them searchable on your Mac.
 
-## Run
+```
+Claude Code ──POST /ingest──▶ scry server ──sync──▶ Scry for Mac ──backup──▶ your Google Drive
+ (plugin)                    (Go, holds only      (local files,
+                              unsynced data)       index, search)
+```
+
+- **The server** ([`server/`](server/), Go, no dependencies) signs people in
+  with Google, issues per-project ingest tokens, meters storage, takes
+  payments, and holds each user's new session lines only until their Mac has
+  them (at most 50 MB per user), then deletes them. It has no search and no
+  session views.
+- **The Mac app** (Electron) signs in with the same Google account, syncs
+  continuously in the background into `~/.jsonl-sessions/`, indexes what
+  arrives, and is where sessions are read and searched. It backs up to the
+  user's own Google Drive on a schedule, like WhatsApp.
+- **The plugin** ([`claude-chat-logger/`](claude-chat-logger/)) sends each
+  prompt and turn from Claude Code to the server.
+
+## Pricing
+
+| | |
+|---|---|
+| First 20 MB of synced sessions | Free |
+| Beyond that | $10 per GB, paid once, never expires |
+
+What is metered is every session line accepted by the server, counted once on
+arrival (it then lives on the Mac and in the Drive backup, not on the server).
+At the limit, `/ingest` answers `402` and writes nothing; the plugin keeps the
+lines queued and they go through once storage is added. Storage is bought from
+the app or the web account page through Stripe Checkout (one-time payment,
+quantity = GB). Limits and price are `SCRY_FREE_MB` (20), `SCRY_SPOOL_MB` (50)
+and `SCRY_PRICE_PER_GB_USD` (10, what the UI shows; Stripe charges the price
+in `STRIPE_PRICE_GB`).
+
+## Server
+
+```bash
+cd server && go run .
+```
+
+Configured by environment:
+
+| Variable | |
+|---|---|
+| `SCRY_GOOGLE_CLIENT_ID` | OAuth client (*Web application*) of the `/app` page. Required. |
+| `SCRY_GOOGLE_DESKTOP_CLIENT_ID` | OAuth client (*Desktop app*) of the Mac app; its ID tokens are accepted too. |
+| `SCRY_ADMIN_EMAILS` | `,`-separated Google emails: unmetered, see every user's usage, can add storage by hand. |
+| `SCRY_PUBLIC_URL` | e.g. `https://scry.teltrix.ai`: Secure cookies, Stripe return URLs. |
+| `SCRY_DATA_DIR` | `state.json` and the spool (`/data`). |
+| `SCRY_PUBLIC_DIR`, `SCRY_PLUGIN_DIR` | `public/` and `claude-chat-logger/` (set in the Docker image). |
+| `STRIPE_SECRET_KEY`, `STRIPE_PRICE_GB`, `STRIPE_WEBHOOK_SECRET` | Payments. `STRIPE_PRICE_GB` is a one-time $10 price; the webhook is `<public url>/billing/webhook` with `checkout.session.completed` and `checkout.session.async_payment_succeeded`. |
+| `PORT`, `HOST` | `9999`, `0.0.0.0` |
+
+State (users, projects, token and session hashes, usage, payments) is one
+JSON file, `state.json`, rewritten atomically; usage counters are flushed every
+2 seconds and on shutdown. All tokens are stored as SHA-256 hashes.
+
+### Routes
+
+- `GET /` landing page, `GET /app` account page (sign-in, storage and buying
+  it, projects and tokens, sync status, admin users), `GET /plugin`,
+  `GET /healthz`, `GET /version`, favicons: public.
+- `GET /auth/config`; `POST /auth/google {credential, device?}`: verifies a
+  Google ID token (RS256 against Google's keys, audience, issuer, expiry,
+  verified email). A browser gets a 30-day `HttpOnly` `SameSite=Lax` cookie;
+  with `device` (the Mac app) the answer carries a one-year device token for
+  `Authorization: Bearer scryd_...`. `POST /auth/logout`.
+- `GET /me`: usage, allowance, bytes waiting on the server, last sync.
+- `GET /projects`, `POST /projects {name}`, `POST /projects/token {name}`:
+  per-user projects (two users can both have `work`); a token is shown once.
+- `POST /ingest` with `Authorization: Bearer <project token>`: JSONL lines.
+  Every line needs a project (`X-Project`, else a `project` field) equal to the
+  token's (400/403), the session is `X-Session-Id`, else `sessionId`, else
+  `default`. All or nothing; `402` over the allowance, `507` when 50 MB are
+  already waiting for the user's Mac.
+- Sync, for the Mac app: `POST /sync/pull?wait=25` seals what has arrived and
+  lists waiting segments, holding the request until something arrives (long
+  poll); `GET /sync/segment?id=` returns one as JSONL records
+  `{"project","session","line"}` (`line` is the raw line as sent);
+  `POST /sync/ack {ids}` deletes them from the server.
+- `POST /billing/checkout {gb}` → `{url}`; `POST /billing/webhook` credits a
+  paid Checkout once (idempotent on the session id).
+- `GET /admin/users`, `POST /admin/users/credit {email, gb}` (admins).
+
+POST routes that use the cookie only accept `application/json`, so a
+cross-site form cannot drive them.
+
+## Mac app
 
 ```bash
 npm install
 npm start
 ```
 
-The app window is a browser on the app's own local server, so the desktop app
-and the headless server run the same UI and API: everything works in both, and
-while the app runs, `http://127.0.0.1:9999/app` opens the same UI in any browser.
-That server listens on localhost only, without basic auth. Only one of the app
-and `npm run serve` can hold port 9999 at a time; the app shows an error and
-quits if the port is taken.
+The window is a browser on the app's own local server
+(`http://127.0.0.1:9999/app`, localhost only), which serves the sessions
+viewer over `~/.jsonl-sessions/` and `~/.claude/projects/`.
 
-## macOS app
+- **Sign in** (header, **Sign in to sync**): Google OAuth for installed apps
+  in the system browser, with a loopback redirect and PKCE
+  ([`lib/google-oauth.js`](lib/google-oauth.js)). One consent covers the scry
+  server (the ID token is exchanged for a device token) and Drive (scope
+  `drive.appdata`: only the app's own hidden folder). The device token and the
+  Google refresh token are encrypted with Electron `safeStorage` (Keychain) in
+  `~/Library/Application Support/Scry/account.json`. After sign-in the app
+  registers itself to open at login, hidden, so it keeps syncing.
+- **Sync** ([`lib/sync.js`](lib/sync.js)): a loop long-polls `/sync/pull`,
+  downloads each segment, appends its lines to
+  `~/.jsonl-sessions/<project>/<session>.jsonl` (fsynced), records the segment
+  as applied, then acks it so the server deletes it. A segment applied but not
+  acked (the app quit in between) is skipped by id when it comes again, so
+  lines are never doubled. Errors back off from 5 s to 5 minutes. It keeps
+  running with the window closed (the app stays in the Dock).
+- **Search index** ([`lib/index.js`](lib/index.js)): which files contain which
+  words, kept in `search-index.json`. Updates are incremental (only bytes
+  appended since the last update are read), run after each sync, every minute
+  for `~/.claude/projects`, and before each search. Search stays a
+  substring match over lines; the index only narrows the files, and never
+  drops a file that could match.
+- **Google Drive backup** ([`lib/backup.js`](lib/backup.js)): daily by
+  default (or weekly, or off), checked hourly, skipped when nothing changed.
+  It uploads one `scry-backup.tar.gz` of all session files to the Drive
+  `appDataFolder` (resumable upload, streamed from disk), replacing the last
+  one. **Restore** downloads it and merges: a session comes back when it is
+  missing locally or the local copy is shorter.
+- **Account** (the chip in the header): storage used and buying more (opens
+  Stripe Checkout in the browser), sync state and what is waiting on the
+  server, backup status and schedule, sign out. **New project** and **Token**
+  create and rotate tokens on the server when signed in.
+- Signed out, the app still works on local data, and its local
+  `/ingest` (projects created in the app, `http://127.0.0.1:9999/ingest`)
+  still accepts lines from a plugin on the same Mac.
+
+### Building the DMG
 
 The landing page's download buttons link to
 [`Scry-mac-arm64.dmg`](https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac-arm64.dmg)
@@ -46,78 +163,24 @@ It does not install itself:
    xattr -dr com.apple.quarantine /Applications/Scry.app
    ```
 
-3. Point the plugin at `http://127.0.0.1:9999/ingest` with a project's token.
+3. Click **Sign in to sync** and sign in with Google.
+
+The workflow stamps `build-info.json` with the Google OAuth client the app
+signs in with, from the `GOOGLE_DESKTOP_CLIENT_ID` and
+`GOOGLE_DESKTOP_CLIENT_SECRET` repository secrets (a *Desktop app* client; its
+secret is not confidential, it ships in the app). Without them the app works
+locally but cannot sign in.
 
 Notarizing (so step 2 goes away) needs an Apple Developer ID certificate and
 electron-builder's `CSC_LINK`/`APPLE_ID` secrets in the workflow, in place of
 `mac.identity: "-"`. The app is packaged without asar because `/plugin` runs
 `tar` on `claude-chat-logger/`, which must be a real directory.
 
-## Ingest
-
-POST JSONL lines to `http://127.0.0.1:9999/ingest` with a project's token
-(see [Projects and tokens](#projects-and-tokens)). Every line needs a
-**project**: the `X-Project` header, else a `project` field in the line. A
-request where any line has no project is rejected with `400` and nothing is
-written. Projects keep different Claude accounts' sessions apart (e.g. `work`,
-`personal`). The session id comes from the `X-Session-Id` header, else a
-`sessionId` field in each line, else `default`. Lines land in
-`~/.jsonl-sessions/<project>/<sessionId>.jsonl`.
-
-```bash
-curl -X POST -H "Authorization: Bearer $SCRY_INGEST_TOKEN" \
-  -H 'X-Project: work' -H 'X-Session-Id: my-session' \
-  --data-binary $'{"msg":"hello"}\n{"msg":"world"}' \
-  http://127.0.0.1:9999/ingest
-```
-
-### Projects and tokens
-
-Ingest tokens belong to projects, not to the deployment. In the app, **New
-project** creates a project and shows its token once; **Token** (with a project
-selected) replaces it, retiring the old one, or issues the first token for a
-project folder from before tokens existed. `/ingest` needs
-`Authorization: Bearer <token>` (401 otherwise), and a token only writes to its
-own project (403 for lines naming another). Tokens are stored as SHA-256 hashes
-in `<dataDir>/.scry/projects.json`; scry cannot show a token again.
-
-Give each Claude account its own project and set `SCRY_PROJECT` and
-`SCRY_INGEST_TOKEN` in that account's environment; the claude-chat-logger
-plugin reads both.
-
-## Plugin
-
-`GET /plugin` answers a tar.gz of [`claude-chat-logger/`](claude-chat-logger/),
-the Claude Code plugin that sends session transcripts to `/ingest`. Cloud
-environment setup scripts install the plugin from this endpoint (see the
-plugin's README); it is unauthenticated because setup scripts cannot read
-secrets, and the tarball is just the plugin's code.
-
-### Migrating pre-project data
-
-Files ingested before projects existed sit directly in the data dir. The UI
-still shows them under **(no project)**; to assign them a project, move them
-into a subdirectory:
-
-```bash
-mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-sessions/work/
-```
-
-## Web pages
-
-- `/` is a public landing page ([`public/index.html`](public/index.html))
-  describing scry, with setup snippets that point at the server serving it. The
-  desktop app has no landing page: there `/` redirects to `/app`.
-- `/app` is the sessions viewer ([`public/app.html`](public/app.html)), behind
-  basic auth when `SCRY_USER` is set.
-- `/favicon.svg`, `/favicon.ico` and `/apple-touch-icon.png` are served from
-  [`public/`](public/), unauthenticated.
-
-## UI
+### Viewer
 
 - **Project menu** in the header: one project, or **All projects**. It scopes
   both the session list and search.
-- **claude-code-local** (Electron app only): a read-only project over the
+- **claude-code-local**: a read-only project over the
   Claude Code transcripts in `~/.claude/projects/` on this machine. Its
   sessions are `~/.claude/projects/<folder>/<id>.jsonl` (subagent transcripts
   deeper down are searchable but not listed). It has no token, and nothing is
@@ -146,113 +209,75 @@ mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-session
   `repos: [{ name, url, branch? }]` (`[]` when unknown). Sessions logged before
   the plugin sent `repos` show none. The sidebar filter matches repo names and
   branches.
-- **Search** (`/` to focus): case-insensitive substring scan. With **All
-  projects** it covers every `.jsonl` under the search dirs and local projects
-  (in the Electron app, `~/.claude/projects/`); with one project, only that project.
-  Clicking a hit opens the session scrolled to that line.
+- **Search** (`/` to focus): case-insensitive substring match. With **All
+  projects** it covers every synced session and `~/.claude/projects/`; with
+  one project, only that project. A local word index (below) narrows which
+  files are read. Clicking a hit opens the session scrolled to that line.
 
-Port, data directory, search directories and local projects are set in `CONFIG` at the top of
-`main.js`.
+Port, data directory, local projects, the server URL and the Google client
+are set in `CONFIG` at the top of `main.js`.
 
-## Server (headless)
+## Plugin
 
-`npm run serve` runs [`server.js`](server.js): the same server and UI as the
-app, without Electron. It is configured by environment: `PORT` (9999), `HOST`
-(0.0.0.0), `SCRY_DATA_DIR` (`~/.jsonl-sessions`), `SCRY_SEARCH_DIRS` (extra
-`:`-separated dirs), and `SCRY_USER`/`SCRY_PASS` (basic auth for `/app`,
-`/search`, `/projects`, `/sessions` and `/session`, and for creating projects).
-The JSON API: `GET /search?q=[&project=]`, `GET /projects`,
-`POST /projects {"name"}` (answers the new token), `POST /projects/token
-{"name"}` (replaces it), `GET /sessions[?project=]`,
-`GET /session?project=&id=` — `project` absent means all projects, present and
-empty means the legacy files with no project. `GET /healthz`, `GET /plugin`, the
-landing page at `/` and the favicons are always open.
+The server's `GET /plugin` answers a tar.gz of [`claude-chat-logger/`](claude-chat-logger/),
+the Claude Code plugin that sends session transcripts to `/ingest`. Cloud
+environment setup scripts install the plugin from this endpoint (see the
+plugin's README); it is unauthenticated because setup scripts cannot read
+secrets, and the tarball is just the plugin's code.
 
-## Accounts and plans
+### Migrating pre-project data
 
-The hosted server can run multi-user: people sign in with Google, each user
-sees only the projects they create, and storage is metered per user against a
-plan. It turns on when `SCRY_GOOGLE_CLIENT_ID` is set; without it (and always
-in the desktop app) scry stays single-tenant as described above.
+Files ingested before projects existed sit directly in the data dir. The UI
+still shows them under **(no project)**; to assign them a project, move them
+into a subdirectory:
 
-| Plan | Storage | Price |
-|------|---------|-------|
-| Free | 20 MB   | $0, no card |
-| Pro  | 2 GB    | $5/month or $48/year |
-| Max  | 25 GB   | $15/month or $144/year |
+```bash
+mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-sessions/work/
+```
 
-- **Sign-in.** `/app` shows a *Continue with Google* button (Google Identity
-  Services). The browser posts Google's ID token to `POST /auth/google`; the
-  server checks its RS256 signature against Google's published keys, the
-  audience (`SCRY_GOOGLE_CLIENT_ID`), issuer, expiry and that the email is
-  verified, creates the user on the Free plan on first sign-in, and sets a
-  30-day `HttpOnly`, `SameSite=Lax` session cookie (`Secure` behind https).
-  Users and session hashes live in `<dataDir>/.scry/accounts.json`.
-- **Ownership.** A project created by a signed-in user records them as its
-  `owner` in `projects.json`. Users see, search, read and re-token only their
-  own projects; anything else answers 404. Project names stay unique across
-  the server.
-- **Metering.** A user's usage is the size of the `.jsonl` files in all their
-  projects, computed from disk on first use and kept current on every ingest.
-  An ingest request that would take the owner past their plan's limit gets
-  `402 Payment Required` and nothing is written; data already stored stays
-  readable and searchable. The chat-logger plugin keeps those lines queued and
-  shows a toast. The header shows a usage meter, with a banner from 80%.
-  `SCRY_FREE_LIMIT_MB` changes the Free limit; plans are in
-  [`lib/accounts.js`](lib/accounts.js).
-- **Admins.** Basic auth (`SCRY_USER`/`SCRY_PASS`) and the Google accounts in
-  `SCRY_ADMIN_EMAILS` are admins: unmetered, they see the deployment's own
-  projects (created over basic auth, and pre-accounts folders), not users'
-  sessions, plus **Users & storage** (`GET /admin/users`: every user's plan and
-  usage). `POST /admin/users/plan {"email","plan"}` sets a plan by hand
-  (comped accounts, invoiced customers).
-- **Payments (Stripe).** With `STRIPE_SECRET_KEY`, the plan cards' **Upgrade**
-  opens Stripe Checkout for that plan's price (`STRIPE_PRICE_PRO`,
-  `STRIPE_PRICE_MAX`), and subscribers get **Manage billing** (the Stripe
-  Billing Portal: switch plan, change card, cancel). Point a Stripe webhook at
-  `<SCRY_PUBLIC_URL>/billing/webhook` with `checkout.session.completed`,
-  `customer.subscription.updated` and `customer.subscription.deleted`, and set
-  its signing secret as `STRIPE_WEBHOOK_SECRET`. Subscriptions that are
-  `active`, `trialing` or `past_due` keep the paid plan; cancelled or unpaid
-  ones drop to Free. Without Stripe keys the paid cards say *Coming soon*.
-
-Setup: in Google Cloud Console create an OAuth client of type *Web
-application* with `https://scry.teltrix.ai` as an authorized JavaScript
-origin, and set `SCRY_GOOGLE_CLIENT_ID`, `SCRY_ADMIN_EMAILS` and
-`SCRY_PUBLIC_URL` (see [`deploy/hetzner.yaml`](deploy/hetzner.yaml)). In
-Stripe, create a product per paid plan with a monthly price (its ID goes in
-`STRIPE_PRICE_<PLAN>`); add the yearly prices to the Billing Portal's product
-catalog so subscribers can switch to annual billing there.
-
-Routes: `GET /auth/config`, `GET /plans` (public), `POST /auth/google`,
-`POST /auth/logout`, `GET /me`, `POST /billing/checkout {"plan"}`,
-`POST /billing/portal`, `POST /billing/webhook`, `GET /admin/users`,
-`POST /admin/users/plan`.
+On `402` (storage full) and `507` (the Mac has not synced for a while) it
+shows a toast and keeps the lines queued.
 
 ## Deployment
 
-The `Dockerfile` packages the headless server (`node:22-alpine`, no npm
-dependencies), storing sessions in the `/data` volume.
-`.github/workflows/docker.yaml` runs the tests and pushes `teltrix/scry:latest`
-and `:<sha>` to Docker Hub on every push to `master` (needs the
-`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets).
+The `Dockerfile` builds the Go server into a static binary on distroless
+(about 7 MB; idle memory around 10 MB), with `public/` and
+`claude-chat-logger/`, storing state and the spool in the `/data` volume.
+`.github/workflows/docker.yaml` runs the Go tests and the app's tests, then
+pushes `teltrix/scry:latest` and `:<sha>` on every push to `master`.
 `deploy/hetzner.yaml` runs it on Kubernetes behind Traefik at
-`scry.teltrix.ai`, with a 10Gi PersistentVolumeClaim and Keel rolling out each
-new `:latest`; its header lists the secret and apply steps. Point senders at
-`https://scry.teltrix.ai/ingest` and setup scripts at
-`https://scry.teltrix.ai/plugin`.
+`scry.teltrix.ai`; its header lists the `scry-env` secret's keys.
+
+Setup:
+
+1. Google Cloud Console: an OAuth client of type *Web application* with
+   `https://scry.teltrix.ai` as an authorized JavaScript origin
+   (`SCRY_GOOGLE_CLIENT_ID`), and one of type *Desktop app*
+   (`SCRY_GOOGLE_DESKTOP_CLIENT_ID`, and the repository secrets for the Mac
+   build). Enable the Google Drive API, and add the `drive.appdata` scope to
+   the consent screen.
+2. Stripe: a product "Scry storage" with a one-time $10 price
+   (`STRIPE_PRICE_GB`), and a webhook to `/billing/webhook`.
+
+The Go server does not read the old Node server's files (`/data/<project>/*.jsonl`,
+`/data/.scry/`); copy them into a Mac's `~/.jsonl-sessions/` to keep them.
 
 ## Test
 
 ```bash
+(cd server && go test -race ./...)
 npm test
 ```
 
-Runs `test/smoke.js` and `test/accounts.js` with plain Node. `test/accounts.js`
-covers Google sign-in (against a local fake key server), per-user isolation,
-quotas, admin routes and Stripe Checkout and webhooks (against a fake Stripe).
-`test/smoke.js` runs with plain Node (no Electron needed): starts the server,
-checks that ingestion without a project is rejected, posts lines for sessions
-in two projects, checks the files, lists projects and sessions, reads a
-session, and searches across all projects, one project, and a fake
-`~/.claude/projects` directory.
+- `server/server_test.go`: sign-in (bad signatures, audiences, expiry,
+  issuers), per-user projects and tokens, ingest, the spool, long polling,
+  acks deleting data, the 402 and 507 limits, Stripe Checkout and webhooks
+  (signature, staleness, idempotency), admin routes, and a restart.
+- `test/smoke.js`: the app's local server: ingest, projects, sessions, search.
+- `test/index.js`: the search index (incremental updates, truncation, long
+  words, and a randomized check that it never misses a match).
+- `test/cloud.js`: end to end, building and running the Go server: Google
+  sign-in through a fake OAuth endpoint (PKCE checked), project creation,
+  ingest, background sync and server-side deletion, local search, Drive
+  backup and restore against a fake Drive, restart, sign-out. Skipped
+  without Go.
