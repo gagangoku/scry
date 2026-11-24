@@ -145,7 +145,8 @@ function post(port, body, headers = {}) {
   // longer than the head (a big pasted image) still yields title, time and URL
   const imgDir = path.join(tmp, 'img-data');
   fs.mkdirSync(path.join(imgDir, 'i'), { recursive: true });
-  const img = (data) => JSON.stringify({ ts: '2026-11-22T10:00:00.000Z', remote_session_id: 'session_01Img', kind: 'prompt', prompt: '',
+  const img = (data) => JSON.stringify({ ts: '2026-11-22T10:00:00.000Z', remote_session_id: 'session_01Img',
+    repos: [{ name: 'acme/app', url: 'https://github.com/acme/app', branch: 'b' }], kind: 'prompt', prompt: '',
     attachments: [{ type: 'image', mediaType: 'image/png', data }] });
   fs.writeFileSync(path.join(imgDir, 'i', 'small.jsonl'), img('iVBORw0KGgo=') + '\n');
   fs.writeFileSync(path.join(imgDir, 'i', 'big.jsonl'), img('A'.repeat(400 * 1024)) + '\n{"kind":"response","response":"ok"}\n');
@@ -154,8 +155,33 @@ function post(port, body, headers = {}) {
   assert.strictEqual(imgs.big.title, '[Image]');
   assert.strictEqual(imgs.big.createdAt, '2026-11-22T10:00:00.000Z');
   assert.strictEqual(imgs.big.webUrl, 'https://claude.ai/code/session_01Img');
+  assert.deepStrictEqual(imgs.big.repos, [{ name: 'acme/app', url: 'https://github.com/acme/app', branch: 'b' }]);
   const bigSess = await readSession({ dataDir: imgDir, project: 'i', id: 'big' });
   assert.strictEqual(bigSess.lines[0].data.attachments[0].data.length, 400 * 1024);
+
+  // Git repos: from the plugin's `repos` field (validated), and for local
+  // transcripts from <cwd>/.git/config's origin plus the line's gitBranch
+  fs.writeFileSync(path.join(webDir, 'w', 'session_01Repo.jsonl'),
+    '{"kind":"prompt","prompt":"r","repos":[{"name":"acme/app","url":"https://github.com/acme/app","branch":"claude/x"},'
+    + '{"name":"../evil","url":"https://x"},{"name":"acme/lib","url":"javascript:alert(1)"}]}\n');
+  const repos = Object.fromEntries(listSessions({ dataDir: webDir, project: 'w' }).map((x) => [x.id, x.repos]));
+  assert.deepStrictEqual(repos['session_01Repo'], [
+    { name: 'acme/app', url: 'https://github.com/acme/app', branch: 'claude/x' },
+    { name: 'acme/lib', url: 'https://github.com/acme/lib' },
+  ]);
+  assert.deepStrictEqual(repos['session_01Abc'], []);
+  const checkout = path.join(tmp, 'checkout');
+  fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(checkout, '.git', 'config'),
+    '[core]\n\tbare = false\n[remote "origin"]\n\turl = git@github.com:acme/tool.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n');
+  const repoLocal = path.join(tmp, 'repo-local');
+  fs.mkdirSync(path.join(repoLocal, 'p'), { recursive: true });
+  fs.writeFileSync(path.join(repoLocal, 'p', 's1.jsonl'),
+    JSON.stringify({ type: 'user', cwd: checkout, gitBranch: 'main', message: { role: 'user', content: 'hi' } }) + '\n');
+  const rl = listSessions({ dataDir: webDir, project: 'loc', localProjects: { loc: repoLocal } });
+  assert.deepStrictEqual(rl[0].repos, [{ name: 'acme/tool', url: 'https://github.com/acme/tool', branch: 'main' }]);
+  const rs = await readSession({ dataDir: webDir, project: 'loc', id: 's1', localProjects: { loc: repoLocal } });
+  assert.strictEqual(rs.repos[0].name, 'acme/tool');
 
   // Search across both the ingest dir and the claude projects dir
   let hits = await searchJsonl({ dirs: [dataDir, path.join(tmp, 'claude-projects')], query: 'alpha', dataDir });

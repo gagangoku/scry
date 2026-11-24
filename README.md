@@ -136,6 +136,16 @@ mkdir -p ~/.jsonl-sessions/work && mv ~/.jsonl-sessions/*.jsonl ~/.jsonl-session
   sessions) or one of its first lines has a `remote_session_id`; `/sessions`
   and `/session` answer that link as `webUrl` (null otherwise). In the
   Electron app it opens in the default browser.
+- Sessions show the **git repo** they work on, as `⎇ owner/repo @ branch`:
+  in the sidebar, and in the session header as a link to the repo at that
+  branch. For cloud sessions it comes from the chat-logger plugin's `repos`
+  field (the session's repositories and working branch from claude.ai/code,
+  else the working directory's `origin` remote); for `claude-code-local`
+  transcripts, from the `origin` remote in the transcript's `cwd` and its
+  `gitBranch`. `/sessions` and `/session` answer it as
+  `repos: [{ name, url, branch? }]` (`[]` when unknown). Sessions logged before
+  the plugin sent `repos` show none. The sidebar filter matches repo names and
+  branches.
 - **Search** (`/` to focus): case-insensitive substring scan. With **All
   projects** it covers every `.jsonl` under the search dirs and local projects
   (in the Electron app, `~/.claude/projects/`); with one project, only that project.
