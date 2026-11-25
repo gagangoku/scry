@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,7 @@ type fixture struct {
 	key     *rsa.PrivateKey
 	stripeM sync.Mutex
 	stripe  []url.Values
+	subQty  int64 // the fake Stripe subscription's quantity
 	dataDir string
 }
 
@@ -76,8 +78,19 @@ func newFixture(t *testing.T, mutate func(*Config)) *fixture {
 		v.Set("_auth", r.Header.Get("Authorization"))
 		f.stripeM.Lock()
 		f.stripe = append(f.stripe, v)
+		if r.URL.Path == "/v1/subscriptions/sub_1" {
+			if r.Method == "POST" {
+				f.subQty, _ = strconv.ParseInt(v.Get("items[0][quantity]"), 10, 64)
+			}
+			sub := map[string]any{"id": "sub_1", "customer": "cus_1", "status": "active", "current_period_end": 1900000000,
+				"metadata": map[string]string{"userId": "g_1"},
+				"items":    map[string]any{"data": []map[string]any{{"id": "si_1", "quantity": f.subQty}}}}
+			f.stripeM.Unlock()
+			json.NewEncoder(w).Encode(sub)
+			return
+		}
 		f.stripeM.Unlock()
-		json.NewEncoder(w).Encode(map[string]string{"url": "https://stripe.test/c/1"})
+		json.NewEncoder(w).Encode(map[string]string{"url": "https://stripe.test" + r.URL.Path})
 	}))
 	t.Cleanup(stripe.Close)
 	pluginDir := filepath.Join(t.TempDir(), "claude-chat-logger")
@@ -389,22 +402,23 @@ func TestQuotasAndSpoolCap(t *testing.T) {
 	}
 	r := f.ingest(tok, "work", "s", line, line)
 	expect(t, r.status, 402, "over the allowance")
-	if !strings.Contains(r.json["error"].(string), "add storage at $10 per GB at https://scry.example/app#billing") {
+	if !strings.Contains(r.json["error"].(string), "add storage ($10 per GB per month) at https://scry.example/app#billing") {
 		t.Fatalf("402 message: %s", r.json["error"])
 	}
 	expect(t, f.do("GET", "/me", nil, web).json["usedBytes"], 1797, "nothing counted on 402")
 
-	// Buying 1 GB lifts the cap; Checkout carries the quantity and user
-	expect(t, f.do("POST", "/billing/checkout", map[string]any{"gb": 0}, web).status, 400, "0 GB")
-	r = f.do("POST", "/billing/checkout", map[string]any{"gb": 3}, web)
-	expect(t, r.json["url"], "https://stripe.test/c/1", "checkout url")
+	// Subscribing starts at Checkout: a subscription with the GB as quantity
+	expect(t, f.do("POST", "/billing/storage", map[string]any{"gb": 0}, web).status, 400, "0 GB")
+	expect(t, f.do("POST", "/billing/portal", map[string]any{}, web).status, 400, "portal before subscribing")
+	r = f.do("POST", "/billing/storage", map[string]any{"gb": 3}, web)
+	expect(t, r.json["url"], "https://stripe.test/v1/checkout/sessions", "checkout url")
 	co := f.stripe[len(f.stripe)-1]
-	expect(t, co.Get("_path"), "/v1/checkout/sessions", "stripe path")
 	expect(t, co.Get("_auth"), "Bearer sk_test", "stripe auth")
-	expect(t, co.Get("mode"), "payment", "one-time payment")
+	expect(t, co.Get("mode"), "subscription", "monthly")
 	expect(t, co.Get("line_items[0][price]"), "price_gb", "price")
 	expect(t, co.Get("line_items[0][quantity]"), "3", "quantity")
 	expect(t, co.Get("client_reference_id"), "g_1", "user")
+	expect(t, co.Get("subscription_data[metadata][userId]"), "g_1", "subscription tagged with the user")
 	expect(t, co.Get("success_url"), "https://scry.example/app?billing=success", "return")
 
 	hook := func(ev map[string]any, secret string, ts int64) resp {
@@ -415,22 +429,57 @@ func TestQuotasAndSpoolCap(t *testing.T) {
 			"Content-Type": "application/json", "Stripe-Signature": fmt.Sprintf("t=%d,v1=%s", ts, hex.EncodeToString(mac.Sum(nil))),
 		})
 	}
-	paid := map[string]any{"id": "evt_1", "type": "checkout.session.completed", "data": map[string]any{"object": map[string]any{
-		"id": "cs_1", "client_reference_id": "g_1", "payment_status": "paid", "metadata": map[string]string{"gb": "3", "userId": "g_1"},
-	}}}
+	subEvent := func(typ, status string, qty, created int64) map[string]any {
+		return map[string]any{"type": typ, "created": created, "data": map[string]any{"object": map[string]any{
+			"id": "sub_1", "customer": "cus_1", "status": status, "current_period_end": 1900000000,
+			"metadata": map[string]string{"userId": "g_1"},
+			"items":    map[string]any{"data": []map[string]any{{"id": "si_1", "quantity": qty}}},
+		}}}
+	}
 	now := time.Now().Unix()
-	expect(t, hook(paid, "wrong", now).status, 400, "bad signature")
-	expect(t, hook(paid, "whsec", now-3600).status, 400, "stale")
-	unpaid := map[string]any{"type": "checkout.session.completed", "data": map[string]any{"object": map[string]any{
-		"id": "cs_0", "client_reference_id": "g_1", "payment_status": "unpaid", "metadata": map[string]string{"gb": "3"},
-	}}}
-	expect(t, hook(unpaid, "whsec", now).status, 200, "unpaid event")
-	expect(t, f.do("GET", "/me", nil, web).json["purchasedBytes"], 0, "unpaid credits nothing")
-	expect(t, hook(paid, "whsec", now).status, 200, "paid")
-	expect(t, hook(paid, "whsec", now).status, 200, "retried")
+	created := subEvent("customer.subscription.created", "active", 3, now)
+	expect(t, hook(created, "wrong", now).status, 400, "bad signature")
+	expect(t, hook(created, "whsec", now-3600).status, 400, "stale")
+	// Not paid yet: nothing granted
+	expect(t, hook(subEvent("customer.subscription.created", "incomplete", 3, now-10), "whsec", now).status, 200, "incomplete")
+	expect(t, f.do("GET", "/me", nil, web).json["allowanceBytes"], 2000, "incomplete grants nothing")
+	expect(t, hook(map[string]any{"type": "checkout.session.completed", "created": now, "data": map[string]any{"object": map[string]any{
+		"id": "cs_1", "client_reference_id": "g_1", "customer": "cus_1"}}}, "whsec", now).status, 200, "checkout completed")
+	expect(t, hook(created, "whsec", now).status, 200, "active")
+	expect(t, hook(created, "whsec", now).status, 200, "retried")
 	me := f.do("GET", "/me", nil, web).json
-	expect(t, me["purchasedBytes"], 3*GB, "credited once")
+	expect(t, me["subscribedGB"], 3, "subscribed")
 	expect(t, me["allowanceBytes"], 3*GB+2000, "allowance")
+	expect(t, f.ingest(tok, "work", "s", line, line).status, 200, "ingest after subscribing")
+
+	// Changing the GB updates the subscription in place
+	f.subQty = 3
+	r = f.do("POST", "/billing/storage", map[string]any{"gb": 5}, web)
+	expect(t, r.status, 200, "change "+string(r.body))
+	expect(t, r.json["subscribedGB"], 5, "now 5 GB")
+	up := f.stripe[len(f.stripe)-1]
+	expect(t, up.Get("_path"), "/v1/subscriptions/sub_1", "update path")
+	expect(t, up.Get("items[0][id]"), "si_1", "item")
+	expect(t, up.Get("proration_behavior"), "create_prorations", "prorated")
+	// A late webhook from before the change does not undo it
+	expect(t, hook(subEvent("customer.subscription.updated", "active", 3, now-5), "whsec", now).status, 200, "late event")
+	expect(t, f.do("GET", "/me", nil, web).json["subscribedGB"], 5, "late event ignored")
+	// The portal, for cancelling and cards
+	expect(t, f.do("POST", "/billing/portal", map[string]any{}, web).json["url"], "https://stripe.test/v1/billing_portal/sessions", "portal")
+	expect(t, f.stripe[len(f.stripe)-1].Get("customer"), "cus_1", "portal customer")
+	// past_due keeps the storage while Stripe retries; cancelling drops it
+	expect(t, hook(subEvent("customer.subscription.updated", "past_due", 5, now+10), "whsec", now).status, 200, "past due")
+	expect(t, f.do("GET", "/me", nil, web).json["subscribedGB"], 5, "past due keeps storage")
+	expect(t, hook(subEvent("customer.subscription.deleted", "canceled", 5, now+20), "whsec", now).status, 200, "deleted")
+	me = f.do("GET", "/me", nil, web).json
+	expect(t, me["subscribedGB"], 0, "cancelled")
+	expect(t, me["allowanceBytes"], 2000, "back to free")
+	r = f.ingest(tok, "work", "s", line)
+	expect(t, r.status, 402, "over free after cancelling")
+	// Subscribing again goes back through Checkout
+	expect(t, f.do("POST", "/billing/storage", map[string]any{"gb": 1}, web).json["url"], "https://stripe.test/v1/checkout/sessions", "resubscribe")
+	expect(t, f.stripe[len(f.stripe)-1].Get("customer"), "cus_1", "same Stripe customer")
+	expect(t, hook(subEvent("customer.subscription.updated", "active", 5, now+30), "whsec", now).status, 200, "active again")
 
 	// The spool cap: unsynced data beyond 5000 bytes is refused with 507
 	var last resp
@@ -464,7 +513,8 @@ func TestAdminAndPersistence(t *testing.T) {
 	expect(t, len(f.do("GET", "/admin/users", nil, admin).list), 2, "users list")
 	expect(t, f.do("POST", "/admin/users/credit", map[string]any{"email": "a@x.com", "gb": 2}, a).status, 403, "credit by non-admin")
 	r := f.do("POST", "/admin/users/credit", map[string]any{"email": "A@x.com", "gb": 2}, admin)
-	expect(t, r.json["purchasedBytes"], 2*GB, "credited")
+	expect(t, r.json["grantedBytes"], 2*GB, "granted")
+	expect(t, r.json["allowanceBytes"], 2*GB+2000, "granted allowance")
 
 	tok := f.do("POST", "/projects", map[string]string{"name": "p"}, a).json["token"].(string)
 	expect(t, f.ingest(tok, "p", "s", `{"a":1}`).status, 200, "ingest")
@@ -481,7 +531,7 @@ func TestAdminAndPersistence(t *testing.T) {
 	f.ts = ts2
 	me = f.do("GET", "/me", nil, a).json
 	expect(t, me["usedBytes"], 8, "usage persisted")
-	expect(t, me["purchasedBytes"], 2*GB, "credit persisted")
+	expect(t, me["grantedBytes"], 2*GB, "grant persisted")
 	if me["pendingBytes"].(float64) <= 0 {
 		t.Fatal("spool size recomputed")
 	}

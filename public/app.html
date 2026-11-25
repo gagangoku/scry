@@ -773,7 +773,8 @@
     function accountDialog() {
       if (!cloudOn()) return;
       const me = cloud.me || {};
-      const p = me.pricing || { pricePerGbUsd: 10 };
+      const p = me.pricing || { pricePerGbMonthUsd: 10 };
+      const sub = me.subscription && me.subscribedGB ? me.subscription : null;
       const err = el('div', { className: 'error' }, accountError);
       accountError = '';
       const busy = (btn, fn) => async () => {
@@ -785,12 +786,20 @@
         return r;
       };
 
-      const gb = el('input', { type: 'number', min: 1, max: 100, value: 1 });
+      const gbOf = () => Math.max(1, Math.min(1000, Number(gb.value) || 1));
+      const gb = el('input', { type: 'number', min: 1, max: 1000, value: sub ? sub.gb : 1 });
       const buy = el('button', { className: 'primary', type: 'button' });
-      const price = () => { buy.textContent = `Buy ${Math.max(1, Number(gb.value) || 1)} GB · $${Math.max(1, Number(gb.value) || 1) * p.pricePerGbUsd}`; };
+      const price = () => {
+        buy.textContent = `${sub ? 'Change to' : 'Subscribe to'} ${gbOf()} GB · $${gbOf() * p.pricePerGbMonthUsd}/month`;
+        buy.disabled = Boolean(sub && gbOf() === sub.gb);
+      };
       gb.oninput = price;
       price();
-      buy.onclick = busy(buy, () => cloudAction('checkout', { gb: Number(gb.value) }));
+      buy.onclick = async () => {
+        if (sub && !confirm(`Change your subscription to ${gbOf()} GB ($${gbOf() * p.pricePerGbMonthUsd}/month)? The difference is prorated on your next invoice.`)) return;
+        await busy(buy, () => cloudAction('storage', { gb: gbOf() }))();
+      };
+      const fmtDay = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
       const syncBtn = el('button', { className: 'icon-btn', type: 'button' }, 'Sync now');
       syncBtn.onclick = busy(syncBtn, () => cloudAction('sync'));
@@ -824,7 +833,9 @@
           me.allowanceBytes ? meter(me.usedBytes, me.allowanceBytes, true) : null,
           el('p', {}, me.admin
             ? 'Admins are not metered.'
-            : `The first ${fmtBytes(me.freeBytes)} are free. More storage is $${p.pricePerGbUsd} per GB, paid once, never expires.`),
+            : `The first ${fmtBytes(me.freeBytes)} are free. More storage is $${p.pricePerGbMonthUsd} per GB per month.`),
+          sub ? el('div', { className: 'kv' }, el('span', {}, 'Subscription'),
+            el('b', {}, `${sub.gb} GB · $${sub.gb * p.pricePerGbMonthUsd}/month` + (sub.currentPeriodEnd ? ` · ${sub.cancelAtPeriodEnd ? 'ends' : 'renews'} ${fmtDay(sub.currentPeriodEnd)}` : '') + (sub.status === 'past_due' ? ' · payment failed' : ''))) : null,
           me.admin || !me.billing ? null : el('div', { className: 'acct-row' }, gb, el('span', { style: 'color:var(--muted)' }, 'GB'), buy),
         ),
         el('div', { className: 'acct-sec' },
@@ -845,6 +856,7 @@
         ),
         err,
         el('div', { className: 'actions' },
+          me.subscription ? el('button', { className: 'icon-btn', type: 'button', onclick: () => cloudAction('portal') }, 'Billing') : null,
           el('button', { className: 'icon-btn', type: 'button', onclick: () => cloudAction('open-account') }, 'Manage on the web'),
           el('button', { className: 'icon-btn', type: 'button', onclick: async () => {
             if (!confirm('Sign out? Sync and backups stop; sessions already on this Mac stay.')) return;

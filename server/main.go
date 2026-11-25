@@ -1,7 +1,7 @@
 // scry server: Google sign-in, per-user projects and ingest tokens, a 50 MB
 // per-user spool that the Scry Mac app drains (and that is deleted once
-// synced), metering against a 20 MB free allowance plus 1 GB packs bought
-// through Stripe, and the public landing page and plugin. Sessions are
+// synced), metering against a 20 MB free allowance plus a monthly Stripe
+// subscription at $10 per GB, and the public landing page and plugin. Sessions are
 // searched only in the Mac app; the server has no search or session views.
 //
 // Environment:
@@ -14,7 +14,7 @@
 //	SCRY_GOOGLE_DESKTOP_CLIENT_ID  OAuth client of the Mac app
 //	SCRY_ADMIN_EMAILS              ','-separated admin Google emails
 //	SCRY_PUBLIC_URL                e.g. https://scry.teltrix.ai
-//	SCRY_FREE_MB (20), SCRY_SPOOL_MB (50), SCRY_PRICE_PER_GB_USD (10)
+//	SCRY_FREE_MB (20), SCRY_SPOOL_MB (50), SCRY_PRICE_PER_GB_MONTH_USD (10)
 //	STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_GB
 package main
 
@@ -75,7 +75,7 @@ func main() {
 		PublicURL:     os.Getenv("SCRY_PUBLIC_URL"),
 		FreeBytes:     int64(envInt("SCRY_FREE_MB", 20)) * MB,
 		SpoolBytes:    int64(envInt("SCRY_SPOOL_MB", 50)) * MB,
-		PricePerGBUSD: envInt("SCRY_PRICE_PER_GB_USD", 10),
+		PricePerGBUSD: envInt("SCRY_PRICE_PER_GB_MONTH_USD", 10),
 		LongPoll:      25 * time.Second,
 		Build:         map[string]any{"version": version, "build": build, "commit": commit, "builtAt": builtAt, "app": "server"},
 		Stripe: &Stripe{

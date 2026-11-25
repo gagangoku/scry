@@ -101,12 +101,14 @@
         <div class="big" id="used"></div>
         <div class="meter" id="used-meter"><i></i></div>
         <div class="stat"><span>Free allowance</span><b id="free"></b></div>
-        <div class="stat"><span>Bought</span><b id="bought"></b></div>
+        <div class="stat"><span>Subscription</span><b id="sub"></b></div>
+        <div class="stat" id="granted-row" hidden><span>Granted</span><b id="granted"></b></div>
         <p id="price-note"></p>
         <form class="row" id="buy">
-          <input type="number" id="gb" min="1" max="100" value="1" style="width:80px" aria-label="GB to buy" />
+          <input type="number" id="gb" min="1" max="1000" value="1" style="width:80px" aria-label="GB a month" />
           <span style="color:var(--muted)">GB</span>
-          <button class="primary" type="submit" id="buy-btn">Buy</button>
+          <button class="primary" type="submit" id="buy-btn">Subscribe</button>
+          <button class="btn" type="button" id="portal" hidden>Manage billing</button>
         </form>
         <div class="error" id="buy-error"></div>
       </section>
@@ -204,7 +206,7 @@
     function showSignIn() {
       $('signin').hidden = false;
       const p = config.pricing;
-      if (p) $('free-pill').textContent = `First ${fmtBytes(p.freeBytes)} free, then $${p.pricePerGbUsd} per GB`;
+      if (p) $('free-pill').textContent = `First ${fmtBytes(p.freeBytes)} free, then $${p.pricePerGbMonthUsd} per GB a month`;
       if (!config.google) { $('signin-error').textContent = 'Google sign-in is not configured on this server.'; return; }
       const s = el('script', { src: 'https://accounts.google.com/gsi/client', async: true });
       s.onerror = () => { $('signin-error').textContent = 'Could not load Google sign-in. Check your connection or ad blocker.'; };
@@ -232,14 +234,26 @@
       $('used').replaceChildren(fmtBytes(me.usedBytes), el('small', {}, me.allowanceBytes === null ? ' synced' : ` of ${fmtBytes(me.allowanceBytes)}`));
       setMeter('used-meter', me.usedBytes, me.allowanceBytes);
       $('free').textContent = fmtBytes(me.freeBytes);
-      $('bought').textContent = me.purchasedBytes ? fmtBytes(me.purchasedBytes) : 'None';
+      const sub = me.subscription && me.subscribedGB ? me.subscription : null;
+      const day = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      $('sub').textContent = sub
+        ? `${sub.gb} GB · $${sub.gb * p.pricePerGbMonthUsd}/month` + (sub.currentPeriodEnd ? ` · ${sub.cancelAtPeriodEnd ? 'ends' : 'renews'} ${day(sub.currentPeriodEnd)}` : '') + (sub.status === 'past_due' ? ' · payment failed' : '')
+        : 'None';
+      $('granted-row').hidden = !me.grantedBytes;
+      $('granted').textContent = fmtBytes(me.grantedBytes);
+      $('portal').hidden = !me.subscription;
       $('price-note').textContent = me.admin
         ? 'Admins are not metered.'
-        : `Everything synced counts once, and stays in your Mac and Google Drive backup. Storage is $${p.pricePerGbUsd} per GB, paid once, never expires.`;
+        : `Everything synced counts toward your storage; it lives on your Mac and in your Google Drive backup. Storage beyond the free ${fmtBytes(me.freeBytes)} is $${p.pricePerGbMonthUsd} per GB per month; change or cancel any time.`;
       $('buy').hidden = !me.billing || me.admin;
       if (!me.billing && !me.admin) $('buy-error').textContent = 'Payments are not set up on this server yet.';
-      const updateBuy = () => { const n = Math.max(1, Math.min(100, Number($('gb').value) || 1)); $('buy-btn').textContent = `Buy ${n} GB · $${n * p.pricePerGbUsd}`; };
-      $('gb').oninput = updateBuy;
+      if (sub && !$('gb').dataset.touched) $('gb').value = sub.gb;
+      const updateBuy = () => {
+        const n = Math.max(1, Math.min(1000, Number($('gb').value) || 1));
+        $('buy-btn').textContent = `${sub ? 'Change to' : 'Subscribe to'} ${n} GB · $${n * p.pricePerGbMonthUsd}/month`;
+        $('buy-btn').disabled = Boolean(sub && n === sub.gb);
+      };
+      $('gb').oninput = () => { $('gb').dataset.touched = '1'; updateBuy(); };
       updateBuy();
 
       $('last-sync').textContent = fmtRel(me.lastSyncAt);
@@ -308,8 +322,9 @@
       const users = await api('GET', 'admin/users');
       $('admin').hidden = false;
       const total = users.reduce((n, u) => n + u.usedBytes, 0);
-      const bought = users.reduce((n, u) => n + u.purchasedBytes, 0);
-      $('admin-summary').textContent = `${users.length} users · ${fmtBytes(total)} synced · ${fmtBytes(bought)} bought`;
+      const subs = users.filter((u) => u.subscribedGB);
+      const gbs = subs.reduce((n, u) => n + u.subscribedGB, 0);
+      $('admin-summary').textContent = `${users.length} users · ${fmtBytes(total)} synced · ${subs.length} subscribed, ${gbs} GB ($${gbs * config.pricing.pricePerGbMonthUsd}/month)`;
       $('users').replaceChildren(...users.map((u) => el('tr', {},
         el('td', { title: u.name || '' }, u.email),
         el('td', { className: 'num mono' }, fmtBytes(u.usedBytes)),
@@ -323,8 +338,17 @@
       e.preventDefault();
       $('buy-error').textContent = '';
       $('buy-btn').disabled = true;
-      try { location.href = (await api('POST', 'billing/checkout', { gb: Number($('gb').value) })).url; }
-      catch (err) { $('buy-error').textContent = err.message; $('buy-btn').disabled = false; }
+      const n = Math.max(1, Math.min(1000, Number($('gb').value) || 1));
+      const sub = me.subscription && me.subscribedGB ? me.subscription : null;
+      if (sub && !confirm(`Change your subscription to ${n} GB ($${n * me.pricing.pricePerGbMonthUsd}/month)? The difference is prorated on your next invoice.`)) { $('buy-btn').disabled = false; return; }
+      try {
+        const r = await api('POST', 'billing/storage', { gb: n });
+        if (r.url) { location.href = r.url; return; }
+        me = r;
+        delete $('gb').dataset.touched;
+        render();
+        flash('', `Your subscription is now ${n} GB a month.`);
+      } catch (err) { $('buy-error').textContent = err.message; $('buy-btn').disabled = false; }
     });
     $('new-project').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -340,6 +364,10 @@
       try { await api('POST', 'admin/users/credit', { email: $('credit-email').value, gb: Number($('credit-gb').value) }); await loadAdmin(); }
       catch (err) { $('credit-error').textContent = err.message; }
     });
+    $('portal').addEventListener('click', async () => {
+      try { location.href = (await api('POST', 'billing/portal', {})).url; }
+      catch (err) { $('buy-error').textContent = err.message; }
+    });
     $('signout').addEventListener('click', async () => { await api('POST', 'auth/logout', {}); location.reload(); });
 
     (async () => {
@@ -349,7 +377,7 @@
       render();
       const qs = new URLSearchParams(location.search);
       if (qs.get('billing') === 'success') {
-        flash('', 'Payment received. Your storage is added within a few seconds.');
+        flash('', 'Subscribed. Your storage is added within a few seconds.');
         setTimeout(async () => { me = await api('GET', 'me'); render(); }, 3000);
       } else if (qs.get('billing') === 'cancelled') {
         flash('warn', 'Checkout cancelled: nothing was charged.');

@@ -32,10 +32,12 @@ type User struct {
 	LastLoginAt time.Time `json:"lastLoginAt"`
 	// Bytes of session lines ever accepted for this user: what is metered.
 	IngestedBytes int64 `json:"ingestedBytes"`
-	// Bytes bought on top of the free allowance (1 GB packs).
-	PurchasedBytes int64               `json:"purchasedBytes"`
-	Payments       []Payment           `json:"payments,omitempty"`
-	Projects       map[string]*Project `json:"projects"`
+	// Extra bytes an admin granted (comps), on top of any subscription.
+	GrantedBytes int64 `json:"grantedBytes"`
+	// The monthly storage subscription (Stripe), if any.
+	Subscription     *Subscription       `json:"subscription,omitempty"`
+	StripeCustomerID string              `json:"stripeCustomerId,omitempty"`
+	Projects         map[string]*Project `json:"projects"`
 	// Next spool segment number; segments are numbered per user.
 	NextSegment int64      `json:"nextSegment"`
 	LastSyncAt  *time.Time `json:"lastSyncAt,omitempty"`
@@ -47,11 +49,29 @@ type Project struct {
 	TokenCreatedAt time.Time `json:"tokenCreatedAt"`
 }
 
-type Payment struct {
-	ID     string    `json:"id"` // Stripe Checkout session id, or admin-<time>
-	GB     int64     `json:"gb"`
-	At     time.Time `json:"at"`
-	Source string    `json:"source"` // stripe | admin
+// Subscription mirrors the user's Stripe subscription: GB a month at
+// $10/GB, counted while Status is active, trialing or past_due (Stripe is
+// retrying the card). UpdatedAt is the Unix time of the Stripe data it came
+// from, so an older webhook delivered late cannot undo a newer change.
+type Subscription struct {
+	ID                string     `json:"id"`
+	GB                int64      `json:"gb"`
+	Status            string     `json:"status"`
+	CurrentPeriodEnd  *time.Time `json:"currentPeriodEnd,omitempty"`
+	CancelAtPeriodEnd bool       `json:"cancelAtPeriodEnd"`
+	UpdatedAt         int64      `json:"updatedAt"`
+}
+
+// ActiveGB is the GB the subscription currently provides.
+func (s *Subscription) ActiveGB() int64 {
+	if s == nil {
+		return 0
+	}
+	switch s.Status {
+	case "active", "trialing", "past_due":
+		return s.GB
+	}
+	return 0
 }
 
 // A signed-in browser (cookie) or Mac app (device token).

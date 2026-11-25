@@ -128,7 +128,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /sync/segment", s.withUser(s.handleSegment))
 	m.HandleFunc("POST /sync/ack", s.withUser(s.handleAck))
 
-	m.HandleFunc("POST /billing/checkout", s.withUser(s.handleCheckout))
+	m.HandleFunc("POST /billing/storage", s.withUser(s.handleStorage))
+	m.HandleFunc("POST /billing/portal", s.withUser(s.handlePortal))
 	m.HandleFunc("POST /billing/webhook", s.handleWebhook)
 
 	m.HandleFunc("GET /admin/users", s.withUser(s.handleAdminUsers))
@@ -217,6 +218,12 @@ func (s *Server) baseURL(r *http.Request) string {
 
 func (s *Server) isAdmin(u *User) bool { return u != nil && s.cfg.AdminEmails[u.Email] }
 
+// allowance is what a user may have synced in total: the free bytes, admin
+// grants, and the GB of a subscription in good standing.
+func (s *Server) allowance(u *User) int64 {
+	return s.cfg.FreeBytes + u.GrantedBytes + u.Subscription.ActiveGB()*GB
+}
+
 // viewer finds the signed-in user from the session cookie (browser) or a
 // device token (Authorization: Bearer scryd_..., the Mac app). Call with the
 // store lock held.
@@ -284,10 +291,10 @@ func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) pricing() map[string]any {
 	return map[string]any{
-		"freeBytes":     s.cfg.FreeBytes,
-		"packBytes":     GB,
-		"pricePerGbUsd": s.cfg.PricePerGBUSD,
-		"spoolBytes":    s.cfg.SpoolBytes,
+		"freeBytes":          s.cfg.FreeBytes,
+		"packBytes":          GB,
+		"pricePerGbMonthUsd": s.cfg.PricePerGBUSD,
+		"spoolBytes":         s.cfg.SpoolBytes,
 	}
 }
 
@@ -381,7 +388,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // describeLocked is what /me answers. Call with the store lock held.
 func (s *Server) describeLocked(u *User) map[string]any {
 	admin := s.isAdmin(u)
-	var allowance any = s.cfg.FreeBytes + u.PurchasedBytes
+	var allowance any = s.allowance(u)
 	if admin {
 		allowance = nil
 	}
@@ -400,7 +407,9 @@ func (s *Server) describeLocked(u *User) map[string]any {
 		"usedBytes":         u.IngestedBytes,
 		"allowanceBytes":    allowance,
 		"freeBytes":         s.cfg.FreeBytes,
-		"purchasedBytes":    u.PurchasedBytes,
+		"grantedBytes":      u.GrantedBytes,
+		"subscribedGB":      u.Subscription.ActiveGB(),
+		"subscription":      u.Subscription,
 		"pendingBytes":      s.spoolBytes[u.ID],
 		"pendingLimitBytes": s.cfg.SpoolBytes,
 		"lastSyncAt":        u.LastSyncAt,
@@ -601,10 +610,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, "the project's owner no longer exists")
 		return
 	}
-	if !s.isAdmin(u) && u.IngestedBytes+raw > s.cfg.FreeBytes+u.PurchasedBytes {
-		allowance := s.cfg.FreeBytes + u.PurchasedBytes
+	if allowance := s.allowance(u); !s.isAdmin(u) && u.IngestedBytes+raw > allowance {
 		writeJSON(w, http.StatusPaymentRequired, map[string]any{
-			"error": fmt.Sprintf("storage limit reached: %s of %s used; add storage at $%d per GB at %s/app#billing",
+			"error": fmt.Sprintf("storage limit reached: %s of %s used; add storage ($%d per GB per month) at %s/app#billing",
 				fmtBytes(u.IngestedBytes), fmtBytes(allowance), s.cfg.PricePerGBUSD, s.baseURL(r)),
 			"usedBytes":      u.IngestedBytes,
 			"allowanceBytes": allowance,
@@ -727,7 +735,11 @@ func (s *Server) handleAck(w http.ResponseWriter, r *http.Request, u *User) {
 
 // ---------- billing ----------
 
-func (s *Server) handleCheckout(w http.ResponseWriter, r *http.Request, u *User) {
+// POST /billing/storage {gb}: the monthly subscription to `gb` GB. Without a
+// subscription it answers {url} of a Stripe Checkout page; with one it
+// changes the quantity in place (prorated) and answers the new state. It
+// refuses to go below what is already synced (that would block ingest).
+func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request, u *User) {
 	if !s.cfg.Stripe.Enabled() {
 		writeErr(w, 404, "billing is not set up on this server")
 		return
@@ -738,14 +750,69 @@ func (s *Server) handleCheckout(w http.ResponseWriter, r *http.Request, u *User)
 	if !readJSON(w, r, &body) {
 		return
 	}
-	if body.GB < 1 || body.GB > 100 {
-		writeErr(w, 400, "buy between 1 and 100 GB")
+	if body.GB < 1 || body.GB > 1000 {
+		writeErr(w, 400, "choose between 1 and 1000 GB")
 		return
 	}
 	s.store.mu.Lock()
 	snapshot := *u
+	sub := u.Subscription
+	if sub != nil {
+		c := *sub
+		sub = &c
+	}
+	need := u.IngestedBytes - s.cfg.FreeBytes - u.GrantedBytes
 	s.store.mu.Unlock()
-	link, err := s.cfg.Stripe.Checkout(&snapshot, body.GB, s.baseURL(r)+"/app")
+
+	if sub == nil || sub.ActiveGB() == 0 {
+		link, err := s.cfg.Stripe.Checkout(&snapshot, body.GB, s.baseURL(r)+"/app")
+		if err != nil {
+			writeErr(w, 502, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]string{"url": link})
+		return
+	}
+	if need > 0 && body.GB*GB < need {
+		writeErr(w, 400, fmt.Sprintf("you have synced %s: keep at least %d GB", fmtBytes(snapshot.IngestedBytes), (need+GB-1)/GB))
+		return
+	}
+	if body.GB == sub.GB {
+		s.handleMe(w, r, u)
+		return
+	}
+	out, err := s.cfg.Stripe.SetQuantity(sub.ID, body.GB)
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	s.store.mu.Lock()
+	u.Subscription = out.toSubscription(time.Now().Unix())
+	err = s.store.saveLocked()
+	me := s.describeLocked(u)
+	s.store.mu.Unlock()
+	if err != nil {
+		writeErr(w, 500, "could not save the subscription")
+		return
+	}
+	log.Printf("scry: billing: %s now subscribes to %d GB", u.ID, body.GB)
+	writeJSON(w, 200, me)
+}
+
+// POST /billing/portal: the Stripe Billing Portal (cancel, card, invoices).
+func (s *Server) handlePortal(w http.ResponseWriter, r *http.Request, u *User) {
+	if !s.cfg.Stripe.Enabled() {
+		writeErr(w, 404, "billing is not set up on this server")
+		return
+	}
+	s.store.mu.Lock()
+	customer := u.StripeCustomerID
+	s.store.mu.Unlock()
+	if customer == "" {
+		writeErr(w, 400, "no subscription yet")
+		return
+	}
+	link, err := s.cfg.Stripe.Portal(customer, s.baseURL(r)+"/app")
 	if err != nil {
 		writeErr(w, 502, err.Error())
 		return
@@ -753,7 +820,9 @@ func (s *Server) handleCheckout(w http.ResponseWriter, r *http.Request, u *User)
 	writeJSON(w, 200, map[string]string{"url": link})
 }
 
-// POST /billing/webhook: credits paid Checkout sessions, once each.
+// POST /billing/webhook: keeps subscriptions current. Events are applied
+// as absolute state, so retries are harmless, and an event older than the
+// data a user already has is ignored (Stripe does not guarantee order).
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.Stripe.Enabled() {
 		http.NotFound(w, r)
@@ -773,34 +842,57 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid webhook JSON")
 		return
 	}
-	obj := ev.Data.Object
-	if (ev.Type == "checkout.session.completed" || ev.Type == "checkout.session.async_payment_succeeded") && obj.PaymentStatus == "paid" {
-		gb, _ := strconv.ParseInt(obj.Metadata["gb"], 10, 64)
-		uid := obj.ClientReferenceID
-		if uid == "" {
-			uid = obj.Metadata["userId"]
-		}
-		s.store.mu.Lock()
-		u := s.store.state.Users[uid]
-		credited := false
-		if u != nil && gb > 0 {
-			dup := false
-			for _, p := range u.Payments {
-				if p.ID == obj.ID {
-					dup = true
-				}
+	s.store.mu.Lock()
+	defer s.store.mu.Unlock()
+	switch ev.Type {
+	case "checkout.session.completed":
+		var cs stripeCheckoutSession
+		if json.Unmarshal(ev.Data.Object, &cs) == nil {
+			uid := cs.ClientReferenceID
+			if uid == "" {
+				uid = cs.Metadata["userId"]
 			}
-			if !dup {
-				u.PurchasedBytes += gb * GB
-				u.Payments = append(u.Payments, Payment{ID: obj.ID, GB: gb, At: time.Now().UTC(), Source: "stripe"})
-				credited = true
+			if u := s.store.state.Users[uid]; u != nil && cs.Customer != "" {
+				u.StripeCustomerID = cs.Customer
 				_ = s.store.saveLocked()
 			}
 		}
-		s.store.mu.Unlock()
-		if credited {
-			log.Printf("scry: billing: %s bought %d GB (%s)", uid, gb, obj.ID)
+	case "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted":
+		var o stripeSubscription
+		if json.Unmarshal(ev.Data.Object, &o) != nil {
+			break
 		}
+		u := s.store.state.Users[o.Metadata["userId"]]
+		if u == nil && o.Customer != "" {
+			for _, x := range s.store.state.Users {
+				if x.StripeCustomerID == o.Customer {
+					u = x
+				}
+			}
+		}
+		if u == nil {
+			log.Printf("scry: billing: %s for unknown user (subscription %s)", ev.Type, o.ID)
+			break
+		}
+		if ev.Type == "customer.subscription.deleted" {
+			o.Status = "canceled"
+		}
+		cur := u.Subscription
+		if cur != nil && cur.ID == o.ID && ev.Created < cur.UpdatedAt {
+			break // older than what we have
+		}
+		next := o.toSubscription(ev.Created)
+		// An event about another subscription only replaces the current one
+		// when it is live (a new subscription after a cancelled one).
+		if cur != nil && cur.ID != o.ID && cur.ActiveGB() > 0 && next.ActiveGB() == 0 {
+			break
+		}
+		u.Subscription = next
+		if o.Customer != "" {
+			u.StripeCustomerID = o.Customer
+		}
+		_ = s.store.saveLocked()
+		log.Printf("scry: billing: %s: %s %s %d GB", ev.Type, u.ID, next.Status, next.GB)
 	}
 	writeJSON(w, 200, map[string]bool{"received": true})
 }
@@ -826,7 +918,8 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request, u *Use
 	writeJSON(w, 200, out)
 }
 
-// POST /admin/users/credit {email, gb}: add storage by hand (comps, invoices).
+// POST /admin/users/credit {email, gb}: grant storage by hand (comps,
+// invoiced customers); it does not expire. Negative gb takes it back.
 func (s *Server) handleAdminCredit(w http.ResponseWriter, r *http.Request, u *User) {
 	if !s.isAdmin(u) {
 		writeErr(w, 403, "admins only")
@@ -855,12 +948,10 @@ func (s *Server) handleAdminCredit(w http.ResponseWriter, r *http.Request, u *Us
 		writeErr(w, 404, "no such user")
 		return
 	}
-	target.PurchasedBytes += body.GB * GB
-	if target.PurchasedBytes < 0 {
-		target.PurchasedBytes = 0
+	target.GrantedBytes += body.GB * GB
+	if target.GrantedBytes < 0 {
+		target.GrantedBytes = 0
 	}
-	now := time.Now().UTC()
-	target.Payments = append(target.Payments, Payment{ID: "admin-" + now.Format(time.RFC3339Nano), GB: body.GB, At: now, Source: "admin"})
 	if err := s.store.saveLocked(); err != nil {
 		writeErr(w, 500, "could not save")
 		return

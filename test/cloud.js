@@ -264,8 +264,9 @@ async function until(fn, what, ms = 10000) {
   cloud.google = null;
   assert.match(await cloud.accessToken(), /^drive-access-r/);
 
-  // Buying storage opens Checkout in the browser (billing is off here: a clear error)
-  await assert.rejects(cloud.action('checkout', { gb: 1 }), /billing is not set up/);
+  // Subscribing opens Checkout in the browser (billing is off here: a clear error)
+  await assert.rejects(cloud.action('storage', { gb: 1 }), /billing is not set up/);
+  await assert.rejects(cloud.action('portal'), /billing is not set up/);
   await cloud.action('open-account');
   assert.deepStrictEqual(opened, [`${serverUrl}/app`]);
 

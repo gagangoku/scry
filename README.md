@@ -25,16 +25,26 @@ Claude Code ──POST /ingest──▶ scry server ──sync──▶ Scry for
 | | |
 |---|---|
 | First 20 MB of synced sessions | Free |
-| Beyond that | $10 per GB, paid once, never expires |
+| Beyond that | $10 per GB per month |
 
-What is metered is every session line accepted by the server, counted once on
-arrival (it then lives on the Mac and in the Drive backup, not on the server).
-At the limit, `/ingest` answers `402` and writes nothing; the plugin keeps the
-lines queued and they go through once storage is added. Storage is bought from
-the app or the web account page through Stripe Checkout (one-time payment,
-quantity = GB). Limits and price are `SCRY_FREE_MB` (20), `SCRY_SPOOL_MB` (50)
-and `SCRY_PRICE_PER_GB_USD` (10, what the UI shows; Stripe charges the price
-in `STRIPE_PRICE_GB`).
+What is metered is every session line accepted by the server, counted when it
+arrives (it then lives on the Mac and in the Drive backup, not on the
+server); the total only grows, like an archive. A user's allowance is the free
+20 MB, plus the GB of their subscription while it is `active`, `trialing` or
+`past_due` (Stripe retrying the card), plus any storage an admin granted. At
+the limit, `/ingest` answers `402` and writes nothing; the plugin keeps the
+lines queued and they go through once storage is added. If a subscription
+ends, nothing synced is lost (it is on the Mac), but new sessions are refused
+past the free allowance.
+
+The subscription is one Stripe subscription per user on a recurring
+`STRIPE_PRICE_GB` ($10 per unit per month), with the quantity as the number of
+GB. The first subscription goes through Stripe Checkout; changing the GB, from
+the app or the web account page, updates it in place with proration; it
+cannot go below what is already synced. Cancelling, cards and invoices are in
+the Stripe Billing Portal. `SCRY_FREE_MB` (20), `SCRY_SPOOL_MB` (50) and
+`SCRY_PRICE_PER_GB_MONTH_USD` (10, what the UI shows; Stripe charges the price)
+set the numbers.
 
 ## Server
 
@@ -52,7 +62,7 @@ Configured by environment:
 | `SCRY_PUBLIC_URL` | e.g. `https://scry.teltrix.ai`: Secure cookies, Stripe return URLs. |
 | `SCRY_DATA_DIR` | `state.json` and the spool (`/data`). |
 | `SCRY_PUBLIC_DIR`, `SCRY_PLUGIN_DIR` | `public/` and `claude-chat-logger/` (set in the Docker image). |
-| `STRIPE_SECRET_KEY`, `STRIPE_PRICE_GB`, `STRIPE_WEBHOOK_SECRET` | Payments. `STRIPE_PRICE_GB` is a one-time $10 price; the webhook is `<public url>/billing/webhook` with `checkout.session.completed` and `checkout.session.async_payment_succeeded`. |
+| `STRIPE_SECRET_KEY`, `STRIPE_PRICE_GB`, `STRIPE_WEBHOOK_SECRET` | Payments. `STRIPE_PRICE_GB` is a recurring monthly $10 price (per unit = per GB); the webhook is `<public url>/billing/webhook` with `checkout.session.completed` and `customer.subscription.created`, `.updated` and `.deleted`. |
 | `PORT`, `HOST` | `9999`, `0.0.0.0` |
 
 State (users, projects, token and session hashes, usage, payments) is one
@@ -69,7 +79,8 @@ JSON file, `state.json`, rewritten atomically; usage counters are flushed every
   verified email). A browser gets a 30-day `HttpOnly` `SameSite=Lax` cookie;
   with `device` (the Mac app) the answer carries a one-year device token for
   `Authorization: Bearer scryd_...`. `POST /auth/logout`.
-- `GET /me`: usage, allowance, bytes waiting on the server, last sync.
+- `GET /me`: usage, allowance, subscription, bytes waiting on the server,
+  last sync.
 - `GET /projects`, `POST /projects {name}`, `POST /projects/token {name}`:
   per-user projects (two users can both have `work`); a token is shown once.
 - `POST /ingest` with `Authorization: Bearer <project token>`: JSONL lines.
@@ -82,9 +93,14 @@ JSON file, `state.json`, rewritten atomically; usage counters are flushed every
   poll); `GET /sync/segment?id=` returns one as JSONL records
   `{"project","session","line"}` (`line` is the raw line as sent);
   `POST /sync/ack {ids}` deletes them from the server.
-- `POST /billing/checkout {gb}` → `{url}`; `POST /billing/webhook` credits a
-  paid Checkout once (idempotent on the session id).
-- `GET /admin/users`, `POST /admin/users/credit {email, gb}` (admins).
+- `POST /billing/storage {gb}`: without a subscription, answers `{url}` of
+  Stripe Checkout; with one, changes its quantity (prorated) and answers
+  `/me`. `POST /billing/portal` → `{url}` of the Billing Portal.
+  `POST /billing/webhook` mirrors the subscription onto the user: events are
+  applied as absolute state, and one older than what the user already has is
+  ignored (Stripe does not guarantee order).
+- `GET /admin/users`, `POST /admin/users/credit {email, gb}` (admins: grant
+  storage that does not expire, e.g. comps).
 
 POST routes that use the cookie only accept `application/json`, so a
 cross-site form cannot drive them.
@@ -127,8 +143,8 @@ viewer over `~/.jsonl-sessions/` and `~/.claude/projects/`.
   `appDataFolder` (resumable upload, streamed from disk), replacing the last
   one. **Restore** downloads it and merges: a session comes back when it is
   missing locally or the local copy is shorter.
-- **Account** (the chip in the header): storage used and buying more (opens
-  Stripe Checkout in the browser), sync state and what is waiting on the
+- **Account** (the chip in the header): storage used, subscribing (opens
+  Stripe Checkout in the browser) or changing the GB, the Billing Portal, sync state and what is waiting on the
   server, backup status and schedule, sign out. **New project** and **Token**
   create and rotate tokens on the server when signed in.
 - Signed out, the app still works on local data, and its local
@@ -256,8 +272,10 @@ Setup:
    (`SCRY_GOOGLE_DESKTOP_CLIENT_ID`, and the repository secrets for the Mac
    build). Enable the Google Drive API, and add the `drive.appdata` scope to
    the consent screen.
-2. Stripe: a product "Scry storage" with a one-time $10 price
-   (`STRIPE_PRICE_GB`), and a webhook to `/billing/webhook`.
+2. Stripe: a product "Scry storage" with a recurring monthly price of $10 per
+   unit (`STRIPE_PRICE_GB`); a webhook to `/billing/webhook` with the events
+   above; and the Billing Portal enabled (cancellation, payment methods,
+   invoices; quantity changes there are picked up by the webhook too).
 
 The Go server does not read the old Node server's files (`/data/<project>/*.jsonl`,
 `/data/.scry/`); copy them into a Mac's `~/.jsonl-sessions/` to keep them.
@@ -271,8 +289,9 @@ npm test
 
 - `server/server_test.go`: sign-in (bad signatures, audiences, expiry,
   issuers), per-user projects and tokens, ingest, the spool, long polling,
-  acks deleting data, the 402 and 507 limits, Stripe Checkout and webhooks
-  (signature, staleness, idempotency), admin routes, and a restart.
+  acks deleting data, the 402 and 507 limits, the storage subscription
+  (Checkout, quantity changes, out-of-order and retried webhooks, past_due,
+  cancellation), admin routes, and a restart.
 - `test/smoke.js`: the app's local server: ingest, projects, sessions, search.
 - `test/index.js`: the search index (incremental updates, truncation, long
   words, and a randomized check that it never misses a match).
