@@ -1,24 +1,27 @@
 # syntax=docker/dockerfile:1
 #
-# Headless scry: the ingest endpoint, /plugin and the browser search UI
-# (server.js). No npm dependencies at runtime: Electron is only for the desktop app.
+# The scry server (Go, server/): sign-in, projects and tokens, ingest into a
+# per-user spool that the Mac app drains, billing, and the public pages and
+# plugin. A static binary on distroless: no shell, no Node.
 #
 # docker build -t scry .
-# docker run -p 9999:9999 -v scry-data:/data \
-#   -e SCRY_USER=... -e SCRY_PASS=... scry
-# Ingest tokens are per project, created in the UI and stored in /data.
-FROM node:22-alpine
+# docker run -p 9999:9999 -v scry-data:/data -e SCRY_GOOGLE_CLIENT_ID=... scry
+FROM golang:1.24-alpine AS build
+WORKDIR /src
+COPY server/ ./
+ARG VERSION=dev BUILD=dev COMMIT= BUILT_AT=
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X main.version=${VERSION} -X main.build=${BUILD} -X main.commit=${COMMIT} -X main.builtAt=${BUILT_AT}" \
+      -o /scry-server .
+
+FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
-COPY package.json server.js ./
-COPY public/ public/
-COPY lib/ lib/
-COPY claude-chat-logger/ claude-chat-logger/
-RUN mkdir -p /data && chown 65532:65532 /data
-ENV NODE_ENV=production \
-    PORT=9999 \
-    HOST=0.0.0.0 \
-    SCRY_DATA_DIR=/data
+COPY --from=build /scry-server /app/scry-server
+COPY public/ /app/public/
+COPY claude-chat-logger/ /app/claude-chat-logger/
+ENV PORT=9999 HOST=0.0.0.0 SCRY_DATA_DIR=/data \
+    SCRY_PUBLIC_DIR=/app/public SCRY_PLUGIN_DIR=/app/claude-chat-logger
 VOLUME /data
 USER 65532:65532
 EXPOSE 9999
-CMD ["node", "server.js"]
+ENTRYPOINT ["/app/scry-server"]

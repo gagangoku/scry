@@ -2,12 +2,11 @@
   "name": "scry",
   "productName": "Scry",
   "version": "1.0.0",
-  "description": "Electron app: ingest Claude transcript JSONL lines over HTTP into per-session files and search them",
+  "description": "Scry for macOS: syncs Claude Code sessions from the scry server, indexes and searches them locally, and backs them up to Google Drive",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "serve": "node server.js",
-    "test": "node test/smoke.js",
+    "test": "node test/smoke.js && node test/index.js && node test/cloud.js",
     "dist:mac": "electron-builder --mac --arm64 --x64 --publish never"
   },
   "build": {

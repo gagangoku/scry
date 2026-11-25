@@ -163,6 +163,11 @@ async function ingest($: EngineInterface, url: string, project: string, line: st
   const token = await $.env.get('SCRY_INGEST_TOKEN')
   if (token) headers['Authorization'] = `Bearer ${token}`
   const res = await $.http.fetch(url, { method: 'POST', headers, body: line + '\n' })
+  // 402: the scry account's storage plan is full; lines stay queued and go
+  // through once the user upgrades.
+  if (res.status === 402) throw new Error('HTTP 402: scry storage limit reached, add storage in the Scry app or at /app')
+  // 507: the server holds 50 MB that has not synced to the Scry Mac app yet.
+  if (res.status === 507) throw new Error('HTTP 507: scry is waiting for your Mac to sync, open the Scry app')
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
 }
 

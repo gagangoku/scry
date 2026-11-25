@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Scry: search every Claude Code session</title>
-  <meta name="description" content="Scry records every Claude Code prompt, response, thinking block and tool call across your machines and cloud sessions, and makes all of it searchable. Self-hosted." />
+  <meta name="description" content="Scry records every Claude Code prompt, response, thinking block and tool call across your machines and cloud sessions, syncs them to your Mac and makes all of it searchable. First 20 MB free." />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <meta name="theme-color" content="#0b0d12" />
   <meta property="og:title" content="Scry: search every Claude Code session" />
-  <meta property="og:description" content="Every prompt, response and tool call from Claude Code, captured and searchable. Self-hosted." />
+  <meta property="og:description" content="Every prompt, response and tool call from Claude Code, captured, synced to your Mac and searchable." />
   <meta property="og:image" content="/apple-touch-icon.png" />
   <style>
     :root {
@@ -310,10 +310,11 @@
         <a href="#features">Features</a>
         <a href="#how">How it works</a>
         <a href="#download">Mac app</a>
-        <a href="#self-host">Self-hosting</a>
+        <a href="#private">Privacy</a>
+        <a href="#pricing">Pricing</a>
         <a href="#faq">FAQ</a>
       </div>
-      <a class="btn sm primary" href="/app">Open app
+      <a class="btn sm primary" href="/app">Sign in
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
       </a>
     </div>
@@ -323,15 +324,15 @@
     <div class="wrap">
       <span class="pill"><b>New</b> Thinking blocks and tool calls, captured live</span>
       <h1>Every Claude Code session.<br /><span class="grad-text">Recorded. Searchable.</span></h1>
-      <p class="lede">Scry captures every prompt, response, thinking block and tool call from Claude Code, on laptops and in cloud sessions, and gives your team one place to search and replay all of it.</p>
+      <p class="lede">Scry captures every prompt, response, thinking block and tool call from Claude Code, on laptops and in cloud sessions, syncs it all to the Scry app on your Mac, and makes every word searchable there.</p>
       <div class="cta-row">
-        <a class="btn primary" href="/app">Open Scry
+        <a class="btn primary" href="/app">Get started free
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </a>
         <a class="btn" href="#download"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.19-1.73-1.36-.14-2.65.8-3.34.8-.69 0-1.75-.78-2.88-.76-1.48.02-2.85.86-3.61 2.19-1.54 2.67-.39 6.62 1.1 8.79.73 1.06 1.6 2.25 2.74 2.21 1.1-.04 1.52-.71 2.85-.71 1.33 0 1.7.71 2.87.69 1.18-.02 1.93-1.08 2.66-2.14.84-1.23 1.18-2.42 1.2-2.48-.03-.01-2.3-.88-2.32-3.5zM14.18 6.13c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.54 1.31-.56.64-1.05 1.67-.92 2.66.97.07 1.96-.49 2.56-1.21z"/></svg>Download for macOS</a>
         <a class="btn" href="#how">Set up in 3 steps</a>
       </div>
-      <div class="hero-note">Self-hosted · One Docker image · Your transcripts stay on your servers</div>
+      <div class="hero-note">First 20 MB free · Searched on your Mac · Backed up to your own Google Drive</div>
 
       <div class="mock-wrap reveal">
         <div class="mock" aria-label="Scry sessions viewer preview" role="img">
@@ -380,7 +381,7 @@
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg>Claude Code CLI</span>
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 13 3 3 0 0 0 6 19z"/></svg>Claude Code on the web</span>
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>macOS desktop app</span>
-        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>Docker &amp; Kubernetes</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 13 3 3 0 0 0 6 19z"/><path d="m9 13 2 2 4-4"/></svg>Google Drive backup</span>
       </div>
     </div>
   </header>
@@ -398,7 +399,7 @@
             <div>
               <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
               <h3>Search across every session</h3>
-              <p>Press <code class="mono">/</code> and search every prompt, answer, thinking block and tool result, across one project or all of them. Click a hit to jump straight to that line in the conversation.</p>
+              <p>Press <code class="mono">/</code> in the Mac app and search every prompt, answer, thinking block and tool result, across one project or all of them, against a local index. Click a hit to jump straight to that line in the conversation.</p>
             </div>
             <div class="mini-search" aria-hidden="true">
               <div class="q"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="mono">rate limit</span></div>
@@ -436,14 +437,14 @@
         <div class="sec-head center reveal">
           <div class="eyebrow">How it works</div>
           <h2>Up and running in three steps.</h2>
-          <p class="sec-lede">A lightweight Claude Code plugin sends each turn to your Scry server. No SDK, no code changes, no proxy in front of Claude.</p>
+          <p class="sec-lede">A lightweight Claude Code plugin sends each turn to Scry, and the Mac app picks it up. No SDK, no code changes, no proxy in front of Claude.</p>
         </div>
         <div class="steps">
           <div class="step reveal">
             <div>
               <div class="step-n"></div>
               <h3>Create a project</h3>
-              <p>Open the app and click <b>New project</b>. Scry shows the project's ingest token once. Keep it somewhere safe.</p>
+              <p>Sign in with Google, on the web or in the Mac app, and click <b>New project</b>. Scry shows the project's ingest token once. Keep it somewhere safe.</p>
             </div>
             <div class="code">
               <div class="code-h"><span>Scry app</span><a class="copy" href="/app" style="text-decoration:none">Open app</a></div>
@@ -489,7 +490,7 @@
         <div class="reveal">
           <div class="eyebrow">Desktop app</div>
           <h2>Scry for your Mac.</h2>
-          <p class="sec-lede">The desktop app runs the same server and UI on your own machine, at <code>http://127.0.0.1:9999</code>, and also searches the transcripts Claude Code already keeps in <code>~/.claude/projects</code>.</p>
+          <p class="sec-lede">The Mac app is where you read and search. Sign in with Google and it keeps syncing your sessions down in the background, indexes them for instant search, and backs them up to your Google Drive. It also searches the transcripts Claude Code already keeps in <code>~/.claude/projects</code>.</p>
           <div class="cta-row" style="justify-content:flex-start;margin-top:28px">
             <a class="btn primary" href="https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac-arm64.dmg" download><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.19-1.73-1.36-.14-2.65.8-3.34.8-.69 0-1.75-.78-2.88-.76-1.48.02-2.85.86-3.61 2.19-1.54 2.67-.39 6.62 1.1 8.79.73 1.06 1.6 2.25 2.74 2.21 1.1-.04 1.52-.71 2.85-.71 1.33 0 1.7.71 2.87.69 1.18-.02 1.93-1.08 2.66-2.14.84-1.23 1.18-2.42 1.2-2.48-.03-.01-2.3-.88-2.32-3.5zM14.18 6.13c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.54 1.31-.56.64-1.05 1.67-.92 2.66.97.07 1.96-.49 2.56-1.21z"/></svg>Download for Apple Silicon</a>
             <a class="btn" href="https://github.com/gagangoku/scry/releases/download/mac-latest/Scry-mac-x64.dmg" download><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.19-1.73-1.36-.14-2.65.8-3.34.8-.69 0-1.75-.78-2.88-.76-1.48.02-2.85.86-3.61 2.19-1.54 2.67-.39 6.62 1.1 8.79.73 1.06 1.6 2.25 2.74 2.21 1.1-.04 1.52-.71 2.85-.71 1.33 0 1.7.71 2.87.69 1.18-.02 1.93-1.08 2.66-2.14.84-1.23 1.18-2.42 1.2-2.48-.03-.01-2.3-.88-2.32-3.5zM14.18 6.13c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.54 1.31-.56.64-1.05 1.67-.92 2.66.97.07 1.96-.49 2.56-1.21z"/></svg>Intel Mac</a>
@@ -505,26 +506,26 @@
                 <pre id="unquarantine"><span class="c-k">xattr</span> -dr com.apple.quarantine /Applications/Scry.app</pre>
               </div>
             </div></li>
-            <li><div><b>Point the plugin at it.</b> Create a project in the app, then set <code>SCRY_INGEST_URL=http://127.0.0.1:9999/ingest</code> with that project's token, as in step 3 above.</div></li>
+            <li><div><b>Sign in with Google.</b> Click <b>Sign in to sync</b>: sessions start arriving within seconds, and Scry keeps syncing whenever it runs, also with the window closed.</div></li>
           </ol>
         </div>
       </div>
     </section>
 
-    <section id="self-host">
+    <section id="private">
       <div class="wrap split">
         <div class="reveal">
-          <div class="eyebrow">Self-hosting</div>
-          <h2>Your transcripts never leave your infrastructure.</h2>
-          <p class="sec-lede">Agent conversations are full of code, credentials in error messages, and design decisions. Scry runs on your own servers, so they stay yours.</p>
+          <div class="eyebrow">Private by design</div>
+          <h2>Your transcripts live on your Mac, not on our servers.</h2>
+          <p class="sec-lede">Agent conversations are full of code, credentials in error messages, and design decisions. The server is only a mailbox: it holds what your Mac has not picked up yet, and deletes it the moment it has.</p>
           <ul class="checks">
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>One small container.</b> Node with no runtime dependencies, sessions stored as plain JSONL files on a volume.</span></li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>Locked down by default.</b> The app sits behind basic auth; ingest only accepts project tokens.</span></li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>No lock-in.</b> Your data is files you can grep, back up or move. Nothing proprietary.</span></li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>Desktop too.</b> Prefer local? The macOS app runs the same UI and also searches <code class="mono">~/.claude/projects</code>.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>Deleted once synced.</b> The server keeps at most 50 MB per user, only until your Mac has it.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>Search runs locally.</b> There is no search on the web: your sessions are indexed and searched on your Mac.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>Backed up to your own Drive.</b> Daily or weekly, to a private app folder in your Google Drive, like WhatsApp. Restore on a new Mac in one click.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg><span><b>No lock-in.</b> Sessions are plain JSONL files in <code class="mono">~/.jsonl-sessions</code> you can grep, copy or move.</span></li>
           </ul>
         </div>
-        <div class="arch reveal" aria-label="Claude Code sessions send turns to a Scry server, which stores them on a volume and serves the app">
+        <div class="arch reveal" aria-label="Claude Code sessions send turns to the Scry server, which hands them to Scry for Mac and deletes them; the Mac backs up to Google Drive">
           <svg viewBox="0 0 440 340" fill="none" role="img">
             <defs>
               <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6d8cff"/><stop offset="1" stop-color="#8b6dff"/></linearGradient>
@@ -548,18 +549,42 @@
 
               <rect x="272" y="84" width="158" height="74" rx="14" fill="url(#g1)"/>
               <text x="351" y="116" text-anchor="middle" font-weight="700" fill="#fff" font-size="15">Scry server</text>
-              <text x="351" y="136" text-anchor="middle" fill="#fff" opacity=".85" font-size="11.5">your infrastructure</text>
+              <text x="351" y="136" text-anchor="middle" fill="#fff" opacity=".85" font-size="11.5">holds unsynced only</text>
 
-              <path d="M351 160 L 351 214" fill="none" stroke="var(--faint)" stroke-width="1.5" marker-end="url(#ah)"/>
-              <rect x="281" y="218" width="140" height="48" rx="11" fill="var(--panel-2)" stroke="var(--border-strong)"/>
-              <text x="351" y="247" text-anchor="middle" font-weight="600">JSONL on a volume</text>
-
-              <path d="M272 140 C 220 160, 200 260, 166 280" fill="none" stroke="var(--faint)" stroke-width="1.5" marker-end="url(#ah)"/>
+              <path d="M272 140 C 220 160, 200 250, 166 278" fill="none" stroke="var(--faint)" stroke-width="1.5" marker-end="url(#ah)"/>
+              <text x="236" y="236" text-anchor="middle" fill="var(--faint)" font-size="10.5" class="mono">sync, then delete</text>
               <rect x="10" y="262" width="150" height="54" rx="11" fill="var(--accent-soft)" stroke="var(--accent)"/>
-              <text x="85" y="285" text-anchor="middle" font-weight="600">Scry app</text>
-              <text x="85" y="303" text-anchor="middle" fill="var(--muted)" font-size="11.5">search &amp; replay</text>
+              <text x="85" y="285" text-anchor="middle" font-weight="600">Scry for Mac</text>
+              <text x="85" y="303" text-anchor="middle" fill="var(--muted)" font-size="11.5">sync, index, search</text>
+
+              <path d="M162 289 L 277 289" fill="none" stroke="var(--faint)" stroke-width="1.5" marker-end="url(#ah)"/>
+              <text x="220" y="281" text-anchor="middle" fill="var(--faint)" font-size="10.5" class="mono">backup</text>
+              <rect x="281" y="265" width="150" height="48" rx="11" fill="var(--panel-2)" stroke="var(--border-strong)"/>
+              <text x="356" y="294" text-anchor="middle" font-weight="600">Your Google Drive</text>
             </g>
           </svg>
+        </div>
+      </div>
+    </section>
+
+    <section id="pricing">
+      <div class="wrap">
+        <div class="sec-head center reveal">
+          <div class="eyebrow">Pricing</div>
+          <h2>Free to start. Pay only for what you keep.</h2>
+          <p class="sec-lede">Your first 20 MB of sessions are free, which is weeks of daily Claude Code use. After that, subscribe to storage a gigabyte at a time.</p>
+        </div>
+        <div class="grid reveal" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));max-width:760px;margin:0 auto">
+          <div class="card">
+            <h3>Free</h3>
+            <p style="font-size:34px;font-weight:700;color:var(--text);margin:6px 0">$0</p>
+            <p>20 MB of synced sessions, every feature: the Mac app, local search, Google Drive backup.</p>
+          </div>
+          <div class="card">
+            <h3>Pay as you grow</h3>
+            <p style="font-size:34px;font-weight:700;color:var(--text);margin:6px 0">$10 <span style="font-size:15px;font-weight:500;color:var(--muted)">per GB / month</span></p>
+            <p>A gigabyte holds tens of thousands of sessions. Add or remove gigabytes any time from the app; changes are prorated, cancel whenever you like.</p>
+          </div>
         </div>
       </div>
     </section>
@@ -577,15 +602,15 @@
           </details>
           <details>
             <summary>What happens if the Scry server is down?</summary>
-            <p>The plugin warns once per session and keeps logging to a local file (<code>~/.claude/chat-log.jsonl</code>), so Claude Code keeps working normally.</p>
+            <p>The plugin warns once per session and keeps logging to a local file (<code>~/.claude/chat-log.jsonl</code>), so Claude Code keeps working normally. If your Mac has been offline for a while, the server holds up to 50 MB for you, then asks the plugin to wait until the Scry app syncs.</p>
           </details>
           <details>
             <summary>Can I keep work and personal sessions separate?</summary>
             <p>Yes. Create a project per Claude account or team and give each its own <code>SCRY_PROJECT</code> and token. A token can only write to its own project, and the app lets you browse one project or all of them.</p>
           </details>
           <details>
-            <summary>How do I deploy it?</summary>
-            <p>Run the Docker image with a volume mounted at <code>/data</code> and <code>SCRY_USER</code> / <code>SCRY_PASS</code> set. A Kubernetes manifest with a persistent volume is included, and <code>/healthz</code> is there for probes.</p>
+            <summary>What counts toward my storage?</summary>
+            <p>Every session line that reaches Scry, counted once when it arrives. It then lives on your Mac and in your Drive backup; the server deletes it after syncing. The first 20 MB are free, and storage beyond that is $10 per GB per month.</p>
           </details>
           <details>
             <summary>Does Scry slow down Claude Code?</summary>
@@ -598,7 +623,7 @@
           <h2>See what your agents have been up to.</h2>
           <p class="sec-lede">Open the app, create a project, and your next Claude Code session shows up in Scry.</p>
           <div class="cta-row">
-            <a class="btn primary" href="/app">Open Scry
+            <a class="btn primary" href="/app">Get started free
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
             </a>
             <a class="btn" href="#how">Read the setup</a>
@@ -616,7 +641,8 @@
         <a href="#how">Setup</a>
         <a href="#download">Mac app</a>
         <a href="/healthz">Status</a>
-        <a href="/app">App</a>
+        <a href="#pricing">Pricing</a>
+        <a href="/app">Account</a>
       </div>
     </div>
   </footer>
