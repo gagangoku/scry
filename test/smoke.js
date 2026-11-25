@@ -141,6 +141,24 @@ function post(port, body, headers = {}) {
   assert.strictEqual(web['uuid-1'], 'https://claude.ai/code/session_01Xyz');
   assert.strictEqual(web['uuid-2'], null);
 
+  // Image prompts: an image-only prompt titles as [Image], and a first line
+  // longer than the head (a big pasted image) still yields title, time and URL
+  const imgDir = path.join(tmp, 'img-data');
+  fs.mkdirSync(path.join(imgDir, 'i'), { recursive: true });
+  const img = (data) => JSON.stringify({ ts: '2026-11-22T10:00:00.000Z', remote_session_id: 'session_01Img',
+    repos: [{ name: 'acme/app', url: 'https://github.com/acme/app', branch: 'b' }], kind: 'prompt', prompt: '',
+    attachments: [{ type: 'image', mediaType: 'image/png', data }] });
+  fs.writeFileSync(path.join(imgDir, 'i', 'small.jsonl'), img('iVBORw0KGgo=') + '\n');
+  fs.writeFileSync(path.join(imgDir, 'i', 'big.jsonl'), img('A'.repeat(400 * 1024)) + '\n{"kind":"response","response":"ok"}\n');
+  const imgs = Object.fromEntries(listSessions({ dataDir: imgDir, project: 'i' }).map((x) => [x.id, x]));
+  assert.strictEqual(imgs.small.title, '[Image]');
+  assert.strictEqual(imgs.big.title, '[Image]');
+  assert.strictEqual(imgs.big.createdAt, '2026-11-22T10:00:00.000Z');
+  assert.strictEqual(imgs.big.webUrl, 'https://claude.ai/code/session_01Img');
+  assert.deepStrictEqual(imgs.big.repos, [{ name: 'acme/app', url: 'https://github.com/acme/app', branch: 'b' }]);
+  const bigSess = await readSession({ dataDir: imgDir, project: 'i', id: 'big' });
+  assert.strictEqual(bigSess.lines[0].data.attachments[0].data.length, 400 * 1024);
+
   // Git repos: from the plugin's `repos` field (validated), and for local
   // transcripts from <cwd>/.git/config's origin plus the line's gitBranch
   fs.writeFileSync(path.join(webDir, 'w', 'session_01Repo.jsonl'),

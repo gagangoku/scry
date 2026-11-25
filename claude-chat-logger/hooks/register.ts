@@ -1,11 +1,14 @@
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, PromptSubmitAttachment, Register } from 'claude-code'
 
 // One JSON object per line. Two kinds:
-//   { kind: "prompt",   ts, session_id, project?, remote_session_id?, repos?, prompt }
+//   { kind: "prompt",   ts, session_id, project?, remote_session_id?, repos?, prompt, attachments? }
 //   { kind: "response", ts, session_id, project?, remote_session_id?, repos?, turn_id, reason, response, thinking? }
 // Prompts are logged when submitted, responses when the turn ends (any reason,
 // aborted and errored included), so a long or interrupted turn never loses the
-// prompt. remote_session_id is the claude.ai/code session id (session_01...),
+// prompt. attachments lists a prompt's pasted images and documents:
+// { type, mediaType?, filename?, data? }, data being the item's base64 bytes as
+// the model received them (left out when unreadable or over MAX_MEDIA_BYTES).
+// remote_session_id is the claude.ai/code session id (session_01...),
 // resolved best-effort in cloud sessions; it is also the scry session key.
 // repos is the git repositories the session works on,
 // [{ name: "owner/repo", url: "https://github.com/owner/repo", branch? }].
@@ -245,6 +248,51 @@ async function searchLines($: EngineInterface, query: string): Promise<string[]>
   return r.stdout.split('\n').filter((l) => l !== '')
 }
 
+// Largest attachment whose bytes are logged; bigger ones keep only their kind.
+const MAX_MEDIA_BYTES = 10 * 1024 * 1024
+
+type LoggedAttachment = { type: string; mediaType?: string; filename?: string; data?: string; note?: string }
+
+// Reads a prompt's attachments. Must run before next(e): $.prompt.media is
+// refused once the submission has settled.
+async function readAttachments($: EngineInterface, list: readonly PromptSubmitAttachment[]): Promise<LoggedAttachment[]> {
+  const out: LoggedAttachment[] = []
+  for (const a of list) {
+    const item: LoggedAttachment = {
+      type: a.type,
+      ...(a.mediaType !== undefined ? { mediaType: a.mediaType } : {}),
+      ...(a.filename !== undefined ? { filename: a.filename } : {}),
+    }
+    out.push(item)
+    if (a.id === undefined || a.type === 'audio') continue
+    try {
+      const chunks: string[] = []
+      let offset: number | undefined
+      for (;;) {
+        const m = await $.prompt.media(offset === undefined ? { id: a.id } : { id: a.id, offset })
+        if (m.deny !== undefined || m.unreadable !== undefined) {
+          item.note = m.deny ?? m.unreadable
+          break
+        }
+        if (m.size > MAX_MEDIA_BYTES) {
+          item.note = `not logged: ${m.size} bytes`
+          break
+        }
+        item.mediaType = m.mediaType
+        chunks.push(m.base64)
+        if (m.next === undefined) {
+          item.data = chunks.join('')
+          break
+        }
+        offset = m.next
+      }
+    } catch (err) {
+      item.note = err instanceof Error ? err.message : String(err)
+    }
+  }
+  return out
+}
+
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + ' …' : s)
 
 export const register: Register = (on) => {
@@ -258,7 +306,10 @@ export const register: Register = (on) => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    if (!e.isMeta) await logLine($, { kind: 'prompt', prompt: e.text })
+    if (!e.isMeta) {
+      const attachments = e.attachments !== undefined && e.attachments.length > 0 ? await readAttachments($, e.attachments) : []
+      await logLine($, { kind: 'prompt', prompt: e.text, ...(attachments.length > 0 ? { attachments } : {}) })
+    }
     return next(e)
   })
 
@@ -301,7 +352,7 @@ export const register: Register = (on) => {
         try {
           const x = JSON.parse(line) as Record<string, string>
           const sid = x['remote_session_id'] ?? x['session_id'] ?? ''
-          if (x['kind'] === 'prompt') return `${x['ts']}  ${sid.slice(0, 24)}\n  prompt:   ${clip(x['prompt'] ?? '', 200)}`
+          if (x['kind'] === 'prompt') return `${x['ts']}  ${sid.slice(0, 24)}\n  prompt:   ${clip(x['prompt'] ?? '', 200)}${Array.isArray(x['attachments']) ? ` [+${x['attachments'].length} attachment(s)]` : ''}`
           return `${x['ts']}  ${sid.slice(0, 24)} (${x['reason']})\n  response: ${clip(x['response'] ?? '', 300)}${x['thinking'] !== undefined ? `\n  thinking: ${clip(x['thinking'], 200)}` : ''}`
         } catch {
           return clip(line, 300)
